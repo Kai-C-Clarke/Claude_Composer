@@ -268,56 +268,69 @@ function snapToScale(midi, scaleSet){
   return midi;
 }
 
-// Rhythmic cells (in units of 1 beat).
-// Each entry is an array of durations that sum to 2 beats (half bar for 4/4 pairs)
-// We'll assemble bars from two half-bar cells so syncopation stays within bar.
-const RHYTHM_CELLS_2 = [
-  [1, 1],           // two quarters — basic
-  [1, 1],           // weighted double for plain feel
-  [0.5, 0.5, 1],   // two eighths + quarter
-  [1, 0.5, 0.5],   // quarter + two eighths
-  [0.5,0.5,0.5,0.5],// four eighths
-  [1.5, 0.5],       // dotted quarter + eighth
-  [0.5, 1.5],       // eighth + dotted (syncopated)
-  [2],              // half note (held)
-  ['r', 1],         // rest + quarter
-  [1, 'r'],         // quarter + rest
-  [0.5, 'r', 0.5, 1],// eighth rest eighth quarter
+// ── PHRASE-AWARE MELODY RHYTHM ────────────────────────────────────────────
+// Melodies breathe. We think in 2-bar phrases:
+//   bar A: a short motif (2-4 notes)
+//   bar B: response or rest (often mostly silence)
+// This gives the melody space to land rather than filling every slot.
+
+// Motif patterns — what happens in an "active" bar (durations in beats)
+const MOTIFS_4 = [
+  [1, 1],             // two quarters then silence
+  [0.5, 0.5, 1],     // two eighths + quarter
+  [1, 0.5, 0.5],     // quarter + two eighths
+  [1.5, 0.5],         // dotted quarter + eighth
+  [0.5, 1.5],         // eighth + dotted (slight syncopation)
+  [2],                // single half note — held, expressive
+  [1, 1, 1],         // three quarters (fills 3 of 4 beats)
+  [0.5, 0.5, 0.5, 0.5], // four eighths — busier, used sparingly
+  [1],                // single quarter — short statement
 ];
-// For 3/4 — cells of 3 beats
-const RHYTHM_CELLS_3 = [
-  [1,1,1],[1,1,1],
-  [0.5,0.5,1,1],[1,0.5,0.5,1],[1,1,0.5,0.5],
-  [1.5,0.5,1],[1,1.5,0.5],
-  [3],['r',1,1],[1,'r',1],[1,1,'r'],
+const MOTIFS_3 = [
+  [1, 1],             // two quarters
+  [1.5, 0.5],         // dotted + eighth
+  [3],                // held dotted half
+  [1, 0.5, 0.5],     // quarter + two eighths
+  [0.5, 0.5, 1],     // two eighths + quarter
+  [1],                // single quarter
 ];
 
-function buildRhythmicBar(barBeats, beatDur, entropy) {
-  // Returns array of {offset, dur} objects for one bar
-  // 'r' entries become rests (no event emitted)
-  const cells = barBeats===3 ? RHYTHM_CELLS_3 : RHYTHM_CELLS_2;
-  const events = [];
-  let pos = 0;
+// Response patterns — what the bar does after a motif (often mostly rest)
+// Represented as a single held note or nothing
+const RESPONSES_4 = [
+  [],                 // full bar rest — most common
+  [],                 // weighted extra
+  [2],                // held half note at bar start
+  [1],                // single quarter on beat 1
+  [0.5, 0.5],         // brief pickup into next bar
+];
+const RESPONSES_3 = [
+  [],                 // full bar rest
+  [],
+  [1.5],              // dotted quarter held
+  [1],                // single quarter
+];
 
-  if(barBeats===3){
-    const cell = cells[Math.floor(Math.random()*cells.length)];
-    for(const d of cell){
-      if(d==='r'){ pos += beatDur*0.5; continue; }
-      events.push({offset: pos, dur: d*beatDur*0.88});
-      pos += d*beatDur;
+function buildPhrasePair(barBeats, beatDur) {
+  // Returns [barAEvents, barBEvents] where A is the motif, B is the response
+  const motifs    = barBeats===3 ? MOTIFS_3    : MOTIFS_4;
+  const responses = barBeats===3 ? RESPONSES_3 : RESPONSES_4;
+
+  const motif    = motifs[Math.floor(Math.random() * motifs.length)];
+  const response = responses[Math.floor(Math.random() * responses.length)];
+
+  function toEvents(pattern, startOffset) {
+    const evs = []; let pos = startOffset||0;
+    for(const d of pattern){
+      evs.push({offset: pos, dur: d * beatDur * 0.88});
+      pos += d * beatDur;
     }
-  } else {
-    // Build 4/4 bar from two half-bar cells
-    for(let half=0; half<2; half++){
-      const cell = cells[Math.floor(Math.random()*cells.length)];
-      for(const d of cell){
-        if(d==='r'){ pos += beatDur*0.5; continue; }
-        events.push({offset: pos, dur: d*beatDur*0.88});
-        pos += d*beatDur;
-      }
-    }
+    return evs;
   }
-  return events;
+
+  // Motif can start on beat 1 or occasionally beat 2 (anacrusis feel)
+  const anacrusis = Math.random() < 0.2 ? beatDur : 0;
+  return [toEvents(motif, anacrusis), toEvents(response, 0)];
 }
 
 // Velocity helpers — musical dynamics
@@ -449,6 +462,7 @@ function buildSchedule(profile, tempo) {
   const bassEvents=[], harmEvents=[], melEvents=[];
   const bassLog=[], harmLog=new Set(), melLog=[];
   const bassSchedule=[], harmSchedule=[], melSchedule=[];
+  const melPhrasePairs = {};  // bar index → rhythmic events, built in pairs
 
   for(let bar=0; bar<chordSeq.length; bar++){
     const rawChord = chordSeq[bar];
@@ -498,8 +512,19 @@ function buildSchedule(profile, tempo) {
       }
     }
 
-    // ── MELODY: rhythmic cells, scale-locked, shaped velocity ─────────────
-    const rhythmicEvents = buildRhythmicBar(profile.barBeats, beatDur, profile.entropy||0.3);
+    // ── MELODY: phrase-aware, scale-locked, shaped velocity ──────────────
+    // Phrases come in pairs (A=motif, B=response/rest). Even bars play motif,
+    // odd bars play response. This gives the melody room to breathe.
+    const isMotifBar = (bar % 2 === 0);
+    if(!melPhrasePairs[bar]) {
+      // Generate a phrase pair for this bar and the next
+      melPhrasePairs[bar]   = null; // placeholder
+      melPhrasePairs[bar+1] = null;
+      const [evA, evB] = buildPhrasePair(profile.barBeats, beatDur);
+      melPhrasePairs[bar]   = evA;
+      melPhrasePairs[bar+1] = evB;
+    }
+    const rhythmicEvents = melPhrasePairs[bar] || [];
     const barMelBase = bar * 8;
     let pitchIdx = 0;
     for(const rv of rhythmicEvents){
