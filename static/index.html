@@ -235,21 +235,98 @@ function generateMelody(allChords,stepsPerBar) {
   return melody;
 }
 
-// Groove helpers (Kai)
-function applySwing(time,swingAmt,stepIndex){
-  return time+((stepIndex%2===1)?swingAmt:0);
-}
+// ── GROOVE + SCALE HELPERS ────────────────────────────────────────────────
 function jitter(maxMs){ return (Math.random()*2-1)*(maxMs/1000); }
-const LANE_OFFSET = { bass:-0.010, harmony:0.000, melody:0.015 };
+
 function liftHarmony(chord){
   return chord.map(m=>{ let x=m; while(x<55)x+=12; while(x>79)x-=12; return x; });
 }
-const ARP_PATTERNS=[
-  [0,2,1,3,2,1,2,0],[0,1,2,3,2,1],[0,2,3,1,2],[0,1,0,2,0,3],[0,2,4,2,1,3]
+
+// Scale definitions — intervals from root (semitones)
+const SCALES = {
+  major: [0,2,4,5,7,9,11],
+  minor: [0,2,3,5,7,8,10],   // natural minor
+};
+function buildScaleSet(rootMidi, mode) {
+  // Returns a Set of all MIDI note numbers in this scale across the full range
+  const intervals = SCALES[mode] || SCALES.minor;
+  const root = rootMidi % 12;
+  const set = new Set();
+  for(let m=0; m<128; m++){
+    const pc = ((m - root) % 12 + 12) % 12;
+    if(intervals.includes(pc)) set.add(m);
+  }
+  return set;
+}
+function snapToScale(midi, scaleSet){
+  if(scaleSet.has(midi)) return midi;
+  // Find nearest scale tone
+  for(let d=1; d<=6; d++){
+    if(scaleSet.has(midi+d)) return midi+d;
+    if(scaleSet.has(midi-d)) return midi-d;
+  }
+  return midi;
+}
+
+// Rhythmic cells (in units of 1 beat).
+// Each entry is an array of durations that sum to 2 beats (half bar for 4/4 pairs)
+// We'll assemble bars from two half-bar cells so syncopation stays within bar.
+const RHYTHM_CELLS_2 = [
+  [1, 1],           // two quarters — basic
+  [1, 1],           // weighted double for plain feel
+  [0.5, 0.5, 1],   // two eighths + quarter
+  [1, 0.5, 0.5],   // quarter + two eighths
+  [0.5,0.5,0.5,0.5],// four eighths
+  [1.5, 0.5],       // dotted quarter + eighth
+  [0.5, 1.5],       // eighth + dotted (syncopated)
+  [2],              // half note (held)
+  ['r', 1],         // rest + quarter
+  [1, 'r'],         // quarter + rest
+  [0.5, 'r', 0.5, 1],// eighth rest eighth quarter
 ];
-function pickArpIndex(step,chordLen,pattern){
-  const pat=pattern&&pattern.length?pattern:ARP_PATTERNS[0];
-  return pat[step%pat.length]%Math.max(1,chordLen);
+// For 3/4 — cells of 3 beats
+const RHYTHM_CELLS_3 = [
+  [1,1,1],[1,1,1],
+  [0.5,0.5,1,1],[1,0.5,0.5,1],[1,1,0.5,0.5],
+  [1.5,0.5,1],[1,1.5,0.5],
+  [3],['r',1,1],[1,'r',1],[1,1,'r'],
+];
+
+function buildRhythmicBar(barBeats, beatDur, entropy) {
+  // Returns array of {offset, dur} objects for one bar
+  // 'r' entries become rests (no event emitted)
+  const cells = barBeats===3 ? RHYTHM_CELLS_3 : RHYTHM_CELLS_2;
+  const events = [];
+  let pos = 0;
+
+  if(barBeats===3){
+    const cell = cells[Math.floor(Math.random()*cells.length)];
+    for(const d of cell){
+      if(d==='r'){ pos += beatDur*0.5; continue; }
+      events.push({offset: pos, dur: d*beatDur*0.88});
+      pos += d*beatDur;
+    }
+  } else {
+    // Build 4/4 bar from two half-bar cells
+    for(let half=0; half<2; half++){
+      const cell = cells[Math.floor(Math.random()*cells.length)];
+      for(const d of cell){
+        if(d==='r'){ pos += beatDur*0.5; continue; }
+        events.push({offset: pos, dur: d*beatDur*0.88});
+        pos += d*beatDur;
+      }
+    }
+  }
+  return events;
+}
+
+// Velocity helpers — musical dynamics
+function beatVelocity(offset, barDur, barBeats, beatDur) {
+  const beat = offset / beatDur;
+  const intBeat = Math.round(beat) % barBeats;
+  // Downbeat strong, other beats softer, with slight random variation
+  const base = intBeat===0 ? 0.82 : (intBeat===2 && barBeats===4) ? 0.65 : 0.48;
+  return clamp(base + (Math.random()*0.14 - 0.07), 0.3, 0.95);
 }
 
 // ── COMPOSER PROFILES ──────────────────────────────────────────────────────
@@ -355,17 +432,18 @@ async function buildSamplers(profile) {
 function buildSchedule(profile, tempo) {
   const {patternId} = profile;
   const beatDur = 60/tempo, barDur = beatDur*profile.barBeats;
-  const swingAmt = 0.012;
 
   let chordSeq = buildChords(patternId);
-  const cad = buildCadenceChords(patternId);
+  const cad    = buildCadenceChords(patternId);
   chordSeq[chordSeq.length-2] = cad[0];
   chordSeq[chordSeq.length-1] = cad[1];
 
-  const melodyMidi = generateMelody(chordSeq, profile.melNotesPerBar);
-  const melNDur    = barDur / profile.melNotesPerBar;
-  const harmStepsPerBar = profile.melNotesPerBar;  // always in sync with melody grid
-  const harmStepDur = barDur / harmStepsPerBar;
+  // Scale set — every melody note will be snapped to this
+  const scaleSet = buildScaleSet(48 + selectedKey, selectedMode);
+
+  // Melody pitches from Kai engine, snapped to scale
+  const melodyMidi = generateMelody(chordSeq, 8).map(m => snapToScale(m, scaleSet));
+
   const totalDur = barDur * chordSeq.length + 2.0;
 
   const bassEvents=[], harmEvents=[], melEvents=[];
@@ -375,53 +453,66 @@ function buildSchedule(profile, tempo) {
   for(let bar=0; bar<chordSeq.length; bar++){
     const rawChord = chordSeq[bar];
     const chord    = liftHarmony(rawChord);
-    const arpPat   = ARP_PATTERNS[Math.floor(Math.random()*ARP_PATTERNS.length)];
     const barStart = bar * barDur;
+    const isStrong = b => b===0 || (profile.barBeats===4 && b===2);
 
-    // BASS — the clock. Placed exactly on the beat, zero jitter.
+    // ── BASS: exact grid, root on beat 1 ──────────────────────────────────
     const root  = Math.max(rawChord[0]-12, 36);
     const fifth = root + 7;
     const bassMode = Math.floor(Math.random()*4);
     const bassHits = [[root, 0]];
     if(bassMode===1 && profile.barBeats>=3) bassHits.push([fifth, Math.floor(profile.barBeats/2)]);
-    if(bassMode===2) bassHits.push([root, Math.floor(profile.barBeats/2)]);
+    if(bassMode===2) bassHits.push([root+12, Math.floor(profile.barBeats/2)]);
     if(bassMode===3) bassHits.push([clamp(root+2,36,52), Math.max(1,profile.barBeats-1)]);
-
     for(const [midi, beat] of bassHits){
-      const t   = barStart + beat * beatDur;   // exact — bass is the grid
-      const dur = beatDur * 0.85;
-      bassEvents.push({time:t, midi, dur});
+      const t   = barStart + beat * beatDur;
+      const dur = beatDur * 0.82;
+      const vel = beat===0 ? 0.80 : 0.60;
+      bassEvents.push({time:t, midi, dur, vel});
       bassSchedule.push({time:t, duration:dur, midi});
       bassLog.push(midi);
     }
 
-    // HARMONY — locked to bar grid, tiny humanise nudge only (max 2ms, can't cross a subdivision)
-    for(let hs=0; hs<harmStepsPerBar; hs++){
-      const idx  = pickArpIndex(hs, chord.length, arpPat);
-      const midi = chord[idx];
-      harmLog.add(midi);
-      const gridT = barStart + hs * harmStepDur;   // exact subdivision position
-      const t     = gridT + jitter(2);              // ±2ms human feel, never enough to cross grid
-      const dur   = harmStepDur * 0.78;
-      harmEvents.push({time:t, midi, dur});
-      harmSchedule.push({time:t, duration:dur, midi});
+    // ── HARMONY: block chords on strong beats, single arpeggio note on weak ─
+    for(let b=0; b<profile.barBeats; b++){
+      const gridT = barStart + b * beatDur;
+      if(isStrong(b)){
+        // Block chord — all chord voices, tiny stagger for warmth
+        chord.forEach((midi, ci) => {
+          const t   = gridT + ci * 0.005 + jitter(2);
+          const dur = beatDur * (profile.barBeats===3 ? 2.7 : 1.85);
+          const vel = b===0 ? 0.62 : 0.50;
+          harmLog.add(midi);
+          harmEvents.push({time:t, midi, dur, vel});
+          harmSchedule.push({time:t, duration:dur, midi});
+        });
+      } else {
+        // Single arpeggiated note
+        const midi = chord[b % chord.length];
+        const t    = gridT + jitter(2);
+        const dur  = beatDur * 0.75;
+        const vel  = 0.38;
+        harmLog.add(midi);
+        harmEvents.push({time:t, midi, dur, vel});
+        harmSchedule.push({time:t, duration:dur, midi});
+      }
     }
 
-    // MELODY — each note placed at exact grid position within bar, tiny nudge only
-    const barMelStart = bar * profile.melNotesPerBar;
-    for(let mi=0; mi<profile.melNotesPerBar; mi++){
-      const midiNote = melodyMidi[barMelStart + mi];
-      if(midiNote===undefined) break;
-      // Occasional rest — skip slot but keep grid position
-      if(Math.random() < 0.10 && mi !== 0) continue;
-      const gridT = barStart + mi * melNDur;        // exact position in bar
-      let dur = melNDur * 0.92;                     // slight gap between notes
-      if(profile.dotted) dur = (mi%2===0) ? melNDur*1.35 : melNDur*0.55;
-      dur = Math.max(0.08, dur);
-      const t = gridT + jitter(2);                  // ±2ms only
-      melEvents.push({time:t, midi:midiNote, dur});
-      melSchedule.push({time:t, duration:dur, midi:midiNote});
-      melLog.push(midiNote);
+    // ── MELODY: rhythmic cells, scale-locked, shaped velocity ─────────────
+    const rhythmicEvents = buildRhythmicBar(profile.barBeats, beatDur, profile.entropy||0.3);
+    const barMelBase = bar * 8;
+    let pitchIdx = 0;
+    for(const rv of rhythmicEvents){
+      if(pitchIdx >= 8) break;
+      const midiRaw = melodyMidi[barMelBase + pitchIdx++];
+      if(midiRaw===undefined) continue;
+      const midi = snapToScale(midiRaw, scaleSet);
+      const t    = barStart + rv.offset + jitter(2);
+      const dur  = Math.max(0.06, rv.dur);
+      const vel  = beatVelocity(rv.offset, barDur, profile.barBeats, beatDur);
+      melEvents.push({time:t, midi, dur, vel});
+      melSchedule.push({time:t, duration:dur, midi});
+      melLog.push(midi);
     }
   }
 
@@ -452,7 +543,7 @@ function scheduleParts(bassEvents, harmEvents, melEvents) {
   // Bass
   const bassPart = new Tone.Part((time, ev) => {
     if(bassSampler && samplersReady) {
-      bassSampler.triggerAttackRelease(toneNote(ev.midi), ev.dur, time, 0.75);
+      bassSampler.triggerAttackRelease(toneNote(ev.midi), ev.dur, time, ev.vel||0.75);
     }
   }, bassEvents.map(e => [e.time, e]));
   bassPart.start(0);
@@ -461,7 +552,7 @@ function scheduleParts(bassEvents, harmEvents, melEvents) {
   // Harmony
   const harmPart = new Tone.Part((time, ev) => {
     if(harmSampler && samplersReady) {
-      harmSampler.triggerAttackRelease(toneNote(ev.midi), ev.dur, time, 0.5);
+      harmSampler.triggerAttackRelease(toneNote(ev.midi), ev.dur, time, ev.vel||0.5);
     }
   }, harmEvents.map(e => [e.time, e]));
   harmPart.start(0);
@@ -470,7 +561,7 @@ function scheduleParts(bassEvents, harmEvents, melEvents) {
   // Melody
   const melPart = new Tone.Part((time, ev) => {
     if(melSampler && samplersReady) {
-      melSampler.triggerAttackRelease(toneNote(ev.midi), ev.dur, time, 0.85);
+      melSampler.triggerAttackRelease(toneNote(ev.midi), ev.dur, time, ev.vel||0.85);
     }
   }, melEvents.map(e => [e.time, e]));
   melPart.start(0);
