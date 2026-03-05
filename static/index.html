@@ -342,29 +342,119 @@ function beatVelocity(offset, barDur, barBeats, beatDur) {
   return clamp(base + (Math.random()*0.14 - 0.07), 0.3, 0.95);
 }
 
-// ── COMPOSER PROFILES ──────────────────────────────────────────────────────
-const PROFILES = {
-  bach:        {name:'Bach',        fullName:'J.S. Bach',                tempo:84, barBeats:4,melNotesPerBar:8, dotted:false,compHits:2,reverb:.15,release:.8},
-  mozart:      {name:'Mozart',      fullName:'W.A. Mozart',              tempo:116,barBeats:3,melNotesPerBar:6, dotted:false,compHits:3,reverb:.12,release:.6},
-  beethoven:   {name:'Beethoven',   fullName:'Ludwig van Beethoven',     tempo:72, barBeats:4,melNotesPerBar:8, dotted:true, compHits:2,reverb:.20,release:1.2},
-  tchaikovsky: {name:'Tchaikovsky', fullName:'Pyotr Ilyich Tchaikovsky', tempo:60, barBeats:3,melNotesPerBar:6, dotted:false,compHits:3,reverb:.28,release:1.0},
-  debussy:     {name:'Debussy',     fullName:'Claude Debussy',           tempo:52, barBeats:4,melNotesPerBar:8, dotted:false,compHits:2,reverb:.40,release:1.5},
-  chopin:      {name:'Chopin',      fullName:'Frédéric Chopin',          tempo:52, barBeats:4,melNotesPerBar:8, dotted:false,compHits:2,reverb:.25,release:1.8},
-  vivaldi:     {name:'Vivaldi',     fullName:'Antonio Vivaldi',          tempo:144,barBeats:4,melNotesPerBar:16,dotted:false,compHits:4,reverb:.10,release:.5},
+// ── COMPOSER DNA ───────────────────────────────────────────────────────────
+// Musical personality objects — the compositional system prompt for each composer.
+// Every scheduling decision reads from these: bass behaviour, harmony style,
+// melody character, rhythm, dynamics, space. Analogous to character prompts in The Cast.
+
+const COMPOSER_DNA = {
+
+  bach: {
+    name:'Bach', fullName:'J.S. Bach',
+    tempo:80, barBeats:4, reverb:.12, release:.7,
+    // Walking bass — melodic in its own right, moves every beat
+    bass:    { style:'walking',   notesPerBar:4, velBase:.72, velVar:.08 },
+    // Sustained chords — harmonic foundation, slight stagger for organ warmth
+    harmony: { style:'sustained', changeOnBeat:1, velBase:.42, velVar:.06, stagger:.008 },
+    // Counterpoint melody — constant motion, sequences, rarely rests
+    melody:  { style:'counterpoint', restDensity:.05, phraseLen:4,
+                rhythmBias:'even_eights', velBase:.68, velVar:.12, sequence:true },
+    scaleMode:'minor',
+  },
+
+  mozart: {
+    name:'Mozart', fullName:'W.A. Mozart',
+    tempo:120, barBeats:4, reverb:.10, release:.55,
+    // Alberti bass — lowest/highest/middle/highest broken chord
+    bass:    { style:'alberti',          notesPerBar:8, velBase:.50, velVar:.06 },
+    // Alberti implies harmony — light touch on beat 1 only
+    harmony: { style:'light_beat1',      changeOnBeat:1, velBase:.36, velVar:.04, stagger:0 },
+    // Singing melody — elegant 4-bar periods, clear phrase rests
+    melody:  { style:'singing', restDensity:.18, phraseLen:4,
+                rhythmBias:'quarters_eighths', velBase:.72, velVar:.10, sequence:false },
+    scaleMode:'major',
+  },
+
+  beethoven: {
+    name:'Beethoven', fullName:'Ludwig van Beethoven',
+    tempo:69, barBeats:4, reverb:.22, release:1.1,
+    // Dramatic bass — heavy downbeat, sometimes silent on weak beats
+    bass:    { style:'dramatic',     notesPerBar:2, velBase:.85, velVar:.15 },
+    // Block chords with sudden dynamic contrast — ff then pp
+    harmony: { style:'block_accent', changeOnBeat:1, velBase:.70, velVar:.22, stagger:.003 },
+    // Motivic — short 3-4 note cell, developed, with dramatic silences
+    melody:  { style:'motivic', restDensity:.35, phraseLen:2,
+                rhythmBias:'dotted_dramatic', velBase:.78, velVar:.25, sequence:true },
+    scaleMode:'minor',
+  },
+
+  tchaikovsky: {
+    name:'Tchaikovsky', fullName:'Pyotr Ilyich Tchaikovsky',
+    tempo:58, barBeats:3, reverb:.30, release:1.1,
+    // Waltz bass — strong beat 1, light 2 and 3
+    bass:    { style:'waltz',      notesPerBar:3, velBase:.75, velVar:.08 },
+    // Waltz chord — beats 2+3 get light chord fill
+    harmony: { style:'waltz_chord', changeOnBeat:1, velBase:.40, velVar:.06, stagger:.006 },
+    // Sweeping melody — long arching lines, sighing falling figures
+    melody:  { style:'sweeping', restDensity:.10, phraseLen:4,
+                rhythmBias:'long_short', velBase:.70, velVar:.12, sequence:false },
+    scaleMode:'minor',
+  },
+
+  debussy: {
+    name:'Debussy', fullName:'Claude Debussy',
+    tempo:50, barBeats:4, reverb:.50, release:1.8,
+    // Pedal bass — sustained root, very sparse, impressionist stillness
+    bass:    { style:'pedal',    notesPerBar:1, velBase:.40, velVar:.05 },
+    // Parallel chords — no resolution, blurred voice leading
+    harmony: { style:'parallel', changeOnBeat:2, velBase:.36, velVar:.05, stagger:.014 },
+    // Floating melody — lots of silence, long notes, impressionist space
+    melody:  { style:'floating', restDensity:.45, phraseLen:2,
+                rhythmBias:'free_long', velBase:.52, velVar:.08, sequence:false },
+    scaleMode:'major',
+  },
+
+  chopin: {
+    name:'Chopin', fullName:'Frederic Chopin',
+    tempo:54, barBeats:4, reverb:.28, release:1.9,
+    // Nocturne bass — low bass note beat 1, open chord mid-bar
+    bass:    { style:'nocturne',       notesPerBar:2, velBase:.62, velVar:.08 },
+    // Rich inner chord on beat 2, sustained and warm
+    harmony: { style:'nocturne_chord', changeOnBeat:1, velBase:.44, velVar:.07, stagger:.010 },
+    // Floating nocturne melody — sings above harmony, rubato feel
+    melody:  { style:'nocturne', restDensity:.22, phraseLen:4,
+                rhythmBias:'lyrical', velBase:.68, velVar:.14, sequence:false },
+    scaleMode:'minor',
+  },
+
+  vivaldi: {
+    name:'Vivaldi', fullName:'Antonio Vivaldi',
+    tempo:152, barBeats:4, reverb:.08, release:.40,
+    // Driving bass — root every beat, relentless energy
+    bass:    { style:'driving',     notesPerBar:4, velBase:.70, velVar:.06 },
+    // Light block chord on beat 1, clears space for rapid melody
+    harmony: { style:'block_light', changeOnBeat:1, velBase:.40, velVar:.05, stagger:.004 },
+    // Sequential melody — rapid figures stepping up/down in pitch
+    melody:  { style:'sequential', restDensity:.04, phraseLen:2,
+                rhythmBias:'even_sixteenths', velBase:.70, velVar:.08, sequence:true },
+    scaleMode:'minor',
+  },
 };
+
+// Backward compat alias used by UI code
+const PROFILES = COMPOSER_DNA;
+
 function blendProfiles(ids) {
-  if(ids.length===1) return {...PROFILES[ids[0]],patternId:ids[0]};
-  const pp=ids.map(id=>PROFILES[id]); const w=1/pp.length;
-  return {
-    name:pp.map(p=>p.name).join(' · '),fullName:pp.map(p=>p.fullName).join(' & '),patternId:ids[0],
-    tempo:  Math.round(pp.reduce((s,p)=>s+p.tempo,0)*w),
-    barBeats:Math.round(pp.reduce((s,p)=>s+p.barBeats,0)*w),
-    melNotesPerBar:Math.round(pp.reduce((s,p)=>s+p.melNotesPerBar,0)*w),
-    dotted: pp.some(p=>p.dotted),
-    compHits:Math.round(pp.reduce((s,p)=>s+p.compHits,0)*w),
-    reverb: pp.reduce((s,p)=>s+p.reverb,0)*w,
-    release:pp.reduce((s,p)=>s+p.release,0)*w,
-  };
+  if(ids.length===1) return {...COMPOSER_DNA[ids[0]], patternId:ids[0]};
+  const pp=ids.map(id=>COMPOSER_DNA[id]); const w=1/pp.length;
+  const base = {...pp[0], patternId:ids[0]};
+  base.name     = pp.map(p=>p.name).join(' + ');
+  base.fullName = pp.map(p=>p.fullName).join(' & ');
+  base.tempo    = Math.round(pp.reduce((s,p)=>s+p.tempo,0)*w);
+  base.barBeats = Math.round(pp.reduce((s,p)=>s+p.barBeats,0)*w);
+  base.reverb   = pp.reduce((s,p)=>s+p.reverb,0)*w;
+  base.release  = pp.reduce((s,p)=>s+p.release,0)*w;
+  return base;
 }
 
 // ── TONE.JS INSTRUMENTS ────────────────────────────────────────────────────
@@ -441,105 +531,282 @@ async function buildSamplers(profile) {
   }
 }
 
-// ── COMPOSITION SCHEDULER ──────────────────────────────────────────────────
-function buildSchedule(profile, tempo) {
-  const {patternId} = profile;
-  const beatDur = 60/tempo, barDur = beatDur*profile.barBeats;
+// ── COMPOSITION SCHEDULER — DNA-AWARE ─────────────────────────────────────
+// Reads from COMPOSER_DNA to determine bass/harmony/melody behaviour per composer.
 
-  let chordSeq = buildChords(patternId);
-  const cad    = buildCadenceChords(patternId);
-  chordSeq[chordSeq.length-2] = cad[0];
-  chordSeq[chordSeq.length-1] = cad[1];
-
-  // Scale set — every melody note will be snapped to this
-  const scaleSet = buildScaleSet(48 + selectedKey, selectedMode);
-
-  // Melody pitches from Kai engine, snapped to scale
-  const melodyMidi = generateMelody(chordSeq, 8).map(m => snapToScale(m, scaleSet));
-
-  const totalDur = barDur * chordSeq.length + 2.0;
-
-  const bassEvents=[], harmEvents=[], melEvents=[];
-  const bassLog=[], harmLog=new Set(), melLog=[];
-  const bassSchedule=[], harmSchedule=[], melSchedule=[];
-  const melPhrasePairs = {};  // bar index → rhythmic events, built in pairs
+function buildBassEvents(dna, chordSeq, barDur, beatDur, bassLog, bassSchedule) {
+  const events = [];
+  const bs = dna.bass;
 
   for(let bar=0; bar<chordSeq.length; bar++){
     const rawChord = chordSeq[bar];
-    const chord    = liftHarmony(rawChord);
     const barStart = bar * barDur;
-    const isStrong = b => b===0 || (profile.barBeats===4 && b===2);
-
-    // ── BASS: exact grid, root on beat 1 ──────────────────────────────────
-    const root  = Math.max(rawChord[0]-12, 36);
+    const root  = Math.max(rawChord[0]-12, 33);
     const fifth = root + 7;
-    const bassMode = Math.floor(Math.random()*4);
-    const bassHits = [[root, 0]];
-    if(bassMode===1 && profile.barBeats>=3) bassHits.push([fifth, Math.floor(profile.barBeats/2)]);
-    if(bassMode===2) bassHits.push([root+12, Math.floor(profile.barBeats/2)]);
-    if(bassMode===3) bassHits.push([clamp(root+2,36,52), Math.max(1,profile.barBeats-1)]);
-    for(const [midi, beat] of bassHits){
-      const t   = barStart + beat * beatDur;
-      const dur = beatDur * 0.82;
-      const vel = beat===0 ? 0.80 : 0.60;
-      bassEvents.push({time:t, midi, dur, vel});
-      bassSchedule.push({time:t, duration:dur, midi});
-      bassLog.push(midi);
-    }
+    const third = root + (dna.scaleMode==='minor' ? 3 : 4);
 
-    // ── HARMONY: block chords on strong beats, single arpeggio note on weak ─
-    for(let b=0; b<profile.barBeats; b++){
-      const gridT = barStart + b * beatDur;
-      if(isStrong(b)){
-        // Block chord — all chord voices, tiny stagger for warmth
-        chord.forEach((midi, ci) => {
-          const t   = gridT + ci * 0.005 + jitter(2);
-          const dur = beatDur * (profile.barBeats===3 ? 2.7 : 1.85);
-          const vel = b===0 ? 0.62 : 0.50;
-          harmLog.add(midi);
-          harmEvents.push({time:t, midi, dur, vel});
-          harmSchedule.push({time:t, duration:dur, midi});
-        });
-      } else {
-        // Single arpeggiated note
-        const midi = chord[b % chord.length];
-        const t    = gridT + jitter(2);
-        const dur  = beatDur * 0.75;
-        const vel  = 0.38;
+    if(bs.style==='walking'){
+      // Bach: root on 1, passing tones on 2+3+4 (stepwise)
+      const walk = [root, root+2, root+4, root+5].map(m=>snapToScale(m,window._scaleSet));
+      walk.forEach((midi,i)=>{
+        const t = barStart + i*beatDur;
+        const vel = i===0 ? bs.velBase+bs.velVar : bs.velBase - bs.velVar*0.5 + jitter(4)*bs.velVar;
+        const dur = beatDur*0.80;
+        events.push({time:t,midi,dur,vel:clamp(vel,0.2,0.95)});
+        bassSchedule.push({time:t,duration:dur,midi}); bassLog.push(midi);
+      });
+
+    } else if(bs.style==='alberti'){
+      // Mozart: Alberti unit = root, root+12(oct), fifth — two per bar
+      [[0],[2],[4],[6]].forEach(([beat])=>{
+        const t   = barStart + beat*beatDur*0.5;
+        const midi = beat%4===0 ? root : beat%4===2 ? root+12 : fifth;
+        const vel  = clamp(bs.velBase + jitter(8)*bs.velVar, 0.2, 0.9);
+        const dur  = beatDur*0.48;
+        events.push({time:t,midi,dur,vel});
+        bassSchedule.push({time:t,duration:dur,midi}); bassLog.push(midi);
+      });
+
+    } else if(bs.style==='dramatic'){
+      // Beethoven: heavy beat 1, sometimes beat 3, big velocity contrast
+      const hits = [0];
+      if(Math.random()<0.6) hits.push(2);
+      hits.forEach(beat=>{
+        const t   = barStart + beat*beatDur;
+        const vel = clamp(bs.velBase + (Math.random()-0.5)*bs.velVar*2, 0.3, 1.0);
+        const dur = beatDur*0.70;
+        events.push({time:t,midi:root,dur,vel});
+        bassSchedule.push({time:t,duration:dur,midi:root}); bassLog.push(root);
+      });
+
+    } else if(bs.style==='waltz'){
+      // Tchaikovsky: root on 1 only — harmony handles 2+3
+      const t   = barStart;
+      const vel = clamp(bs.velBase + jitter(5)*bs.velVar, 0.4, 0.9);
+      const dur = beatDur*0.75;
+      events.push({time:t,midi:root,dur,vel});
+      bassSchedule.push({time:t,duration:dur,midi:root}); bassLog.push(root);
+
+    } else if(bs.style==='pedal'){
+      // Debussy: sustained root, very quiet, held whole bar
+      if(bar%2===0){  // only every other bar — sparse
+        const t   = barStart;
+        const vel = clamp(bs.velBase + jitter(4)*bs.velVar, 0.2, 0.6);
+        const dur = barDur*0.95;
+        events.push({time:t,midi:root,dur,vel});
+        bassSchedule.push({time:t,duration:dur,midi:root}); bassLog.push(root);
+      }
+
+    } else if(bs.style==='nocturne'){
+      // Chopin: deep bass note on 1, mid-register chord note on beat 3
+      [[0,root-12],[2,fifth]].forEach(([beat,midi])=>{
+        const m   = Math.max(midi,28);
+        const t   = barStart + beat*beatDur;
+        const vel = clamp(bs.velBase + jitter(6)*bs.velVar, 0.3, 0.85);
+        const dur = beatDur*(beat===0?2.8:1.5);
+        events.push({time:t,midi:m,dur,vel});
+        bassSchedule.push({time:t,duration:dur,midi:m}); bassLog.push(m);
+      });
+
+    } else {
+      // Vivaldi driving: root every beat
+      for(let b=0;b<4;b++){
+        const t   = barStart + b*beatDur;
+        const vel = clamp(bs.velBase + jitter(6)*bs.velVar*(b===0?0.5:1), 0.3, 0.9);
+        const dur = beatDur*0.75;
+        events.push({time:t,midi:root,dur,vel});
+        bassSchedule.push({time:t,duration:dur,midi:root}); bassLog.push(root);
+      }
+    }
+  }
+  return events;
+}
+
+function buildHarmonyEvents(dna, chordSeq, barDur, beatDur, harmLog, harmSchedule) {
+  const events = [];
+  const hs = dna.harmony;
+
+  for(let bar=0; bar<chordSeq.length; bar++){
+    const chord    = liftHarmony(chordSeq[bar]);
+    const barStart = bar * barDur;
+
+    if(hs.style==='sustained' || hs.style==='block_light'){
+      // Bach / Vivaldi: block chord on beat 1, held
+      chord.forEach((midi,ci)=>{
+        const t   = barStart + ci*hs.stagger + jitter(2);
+        const dur = barDur * 0.92;
+        const vel = clamp(hs.velBase + jitter(6)*hs.velVar, 0.2, 0.8);
         harmLog.add(midi);
-        harmEvents.push({time:t, midi, dur, vel});
-        harmSchedule.push({time:t, duration:dur, midi});
+        events.push({time:t,midi,dur,vel});
+        harmSchedule.push({time:t,duration:dur,midi});
+      });
+
+    } else if(hs.style==='light_beat1'){
+      // Mozart: very light chord on beat 1 only (Alberti bass carries harmony)
+      chord.forEach((midi,ci)=>{
+        const t   = barStart + ci*0.004 + jitter(2);
+        const dur = beatDur*0.85;
+        const vel = clamp(hs.velBase + jitter(4)*hs.velVar, 0.15, 0.5);
+        harmLog.add(midi);
+        events.push({time:t,midi,dur,vel});
+        harmSchedule.push({time:t,duration:dur,midi});
+      });
+
+    } else if(hs.style==='block_accent'){
+      // Beethoven: block chord, random strong/soft for drama
+      const isFf = Math.random() < 0.4;
+      chord.forEach((midi,ci)=>{
+        const t   = barStart + ci*hs.stagger + jitter(2);
+        const dur = beatDur * (Math.random()<0.3 ? 0.3 : 1.8); // occasional short stab
+        const vel = isFf ? clamp(hs.velBase+hs.velVar, 0.4, 1.0) : clamp(hs.velBase-hs.velVar, 0.15, 0.5);
+        harmLog.add(midi);
+        events.push({time:t,midi,dur,vel});
+        harmSchedule.push({time:t,duration:dur,midi});
+      });
+
+    } else if(hs.style==='waltz_chord'){
+      // Tchaikovsky: chord on beats 2+3, not beat 1 (bass has that)
+      [1,2].forEach(beat=>{
+        chord.forEach((midi,ci)=>{
+          const t   = barStart + beat*beatDur + ci*hs.stagger + jitter(3);
+          const dur = beatDur*0.82;
+          const vel = clamp(hs.velBase + jitter(5)*hs.velVar, 0.2, 0.65);
+          harmLog.add(midi);
+          events.push({time:t,midi,dur,vel});
+          harmSchedule.push({time:t,duration:dur,midi});
+        });
+      });
+
+    } else if(hs.style==='parallel'){
+      // Debussy: chord moves in parallel, slow harmonic rhythm, blurred
+      const changeEvery = hs.changeOnBeat * beatDur;
+      for(let t=barStart; t<barStart+barDur-0.1; t+=changeEvery){
+        chord.forEach((midi,ci)=>{
+          const tt  = t + ci*hs.stagger + jitter(3);
+          const dur = changeEvery*0.95;
+          const vel = clamp(hs.velBase + jitter(4)*hs.velVar, 0.15, 0.55);
+          harmLog.add(midi);
+          events.push({time:tt,midi,dur,vel});
+          harmSchedule.push({time:tt,duration:dur,midi});
+        });
+      }
+
+    } else if(hs.style==='nocturne_chord'){
+      // Chopin: rich chord on beat 2, held warmly
+      chord.forEach((midi,ci)=>{
+        const t   = barStart + beatDur + ci*hs.stagger + jitter(3);
+        const dur = barDur*0.80;
+        const vel = clamp(hs.velBase + jitter(6)*hs.velVar, 0.2, 0.70);
+        harmLog.add(midi);
+        events.push({time:t,midi,dur,vel});
+        harmSchedule.push({time:t,duration:dur,midi});
+      });
+    }
+  }
+  return events;
+}
+
+// Rhythm pattern library keyed to melody.rhythmBias
+const RHYTHM_BY_STYLE = {
+  even_eights:       [[0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]],
+  quarters_eighths:  [[1,1,1,1],[1,0.5,0.5,1],[0.5,0.5,1,0.5,0.5],[1,1,0.5,0.5]],
+  dotted_dramatic:   [[1.5,0.5],[1.5,0.5,1],['r',1.5,0.5],['r','r',1.5,0.5],[2,2]],
+  long_short:        [[1.5,0.5,1,1],[2,1],[1,1.5,0.5],[1,2]],
+  free_long:         [[2,2],[3,1],[4],['r',2],['r','r',2]],
+  lyrical:           [[1,1,1,1],[2,1,1],[1.5,0.5,1,1],['r',1,1,1],[1,2,1]],
+  even_sixteenths:   [[0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25]],
+  quarters_eighths3: [[1,1,1],[1,0.5,0.5,1],[0.5,0.5,2],[3]],
+  long_short3:       [[2,1],[1,2],[1.5,0.5,1],[3]],
+  free_long3:        [[3],['r',2],['r','r',1],[1.5,1.5]],
+  lyrical3:          [[1,1,1],[2,1],[1.5,0.5,1],[3],['r',1,1]],
+};
+
+function pickRhythm(bias, barBeats) {
+  const key = barBeats===3 ? (bias+'3' in RHYTHM_BY_STYLE ? bias+'3' : 'quarters_eighths3') : bias;
+  const pool = RHYTHM_BY_STYLE[key] || RHYTHM_BY_STYLE.quarters_eighths;
+  return pool[Math.floor(Math.random()*pool.length)];
+}
+
+function buildMelodyEvents(dna, chordSeq, melodyPool, barDur, beatDur, scaleSet, melLog, melSchedule) {
+  const events = [];
+  const ms = dna.melody;
+  const phrasePairs = {};
+
+  for(let bar=0; bar<chordSeq.length; bar++){
+    const barStart  = bar * barDur;
+
+    // Phrase pair logic — even bars are motif, odd bars are response/rest
+    if(phrasePairs[bar]===undefined){
+      const isActive = (bar%2===0);
+      if(isActive){
+        // Generate motif for this bar + response for next
+        const motifRhythm    = pickRhythm(ms.rhythmBias, dna.barBeats);
+        const responseRhythm = Math.random() < ms.restDensity+0.3
+          ? []   // full rest bar
+          : pickRhythm(ms.rhythmBias==='even_eights'?'quarters_eighths':ms.rhythmBias, dna.barBeats)
+              .slice(0,2); // shortened response
+        phrasePairs[bar]   = motifRhythm;
+        phrasePairs[bar+1] = responseRhythm;
+      } else {
+        phrasePairs[bar] = [];
       }
     }
 
-    // ── MELODY: phrase-aware, scale-locked, shaped velocity ──────────────
-    // Phrases come in pairs (A=motif, B=response/rest). Even bars play motif,
-    // odd bars play response. This gives the melody room to breathe.
-    const isMotifBar = (bar % 2 === 0);
-    if(!melPhrasePairs[bar]) {
-      // Generate a phrase pair for this bar and the next
-      melPhrasePairs[bar]   = null; // placeholder
-      melPhrasePairs[bar+1] = null;
-      const [evA, evB] = buildPhrasePair(profile.barBeats, beatDur);
-      melPhrasePairs[bar]   = evA;
-      melPhrasePairs[bar+1] = evB;
-    }
-    const rhythmicEvents = melPhrasePairs[bar] || [];
+    const rhythm   = phrasePairs[bar] || [];
     const barMelBase = bar * 8;
-    let pitchIdx = 0;
-    for(const rv of rhythmicEvents){
-      if(pitchIdx >= 8) break;
-      const midiRaw = melodyMidi[barMelBase + pitchIdx++];
+    let pitchIdx   = 0;
+    let pos        = 0;
+
+    for(const d of rhythm){
+      if(pitchIdx>=8 || pos>=barDur-0.05) break;
+      if(d==='r'){ pos+=beatDur*0.5; continue; }
+
+      const midiRaw = melodyPool[barMelBase + pitchIdx++];
       if(midiRaw===undefined) continue;
-      const midi = snapToScale(midiRaw, scaleSet);
-      const t    = barStart + rv.offset + jitter(2);
-      const dur  = Math.max(0.06, rv.dur);
-      const vel  = beatVelocity(rv.offset, barDur, profile.barBeats, beatDur);
-      melEvents.push({time:t, midi, dur, vel});
+
+      // Sequence: shift pitch up/down by 2 semitones every 2 bars
+      let midi = snapToScale(midiRaw, scaleSet);
+      if(ms.sequence && bar%2!==0) midi = snapToScale(midi+2, scaleSet);
+
+      const dur  = Math.max(0.06, d*beatDur*0.88);
+      const t    = barStart + pos + jitter(3);
+      const vel  = clamp(
+        ms.velBase + (pos===0?ms.velVar:-ms.velVar*0.3) + (Math.random()-0.5)*ms.velVar,
+        0.2, 0.95
+      );
+
+      events.push({time:t, midi, dur, vel});
       melSchedule.push({time:t, duration:dur, midi});
       melLog.push(midi);
+      pos += d*beatDur;
     }
   }
+  return events;
+}
+
+function buildSchedule(profile, tempo) {
+  const dna      = profile;
+  const beatDur  = 60/tempo;
+  const barDur   = beatDur * dna.barBeats;
+
+  let chordSeq = buildChords(dna.patternId);
+  const cad    = buildCadenceChords(dna.patternId);
+  chordSeq[chordSeq.length-2] = cad[0];
+  chordSeq[chordSeq.length-1] = cad[1];
+
+  const scaleSet = buildScaleSet(48+selectedKey, selectedMode);
+  window._scaleSet = scaleSet;  // shared with bass walking
+
+  const melodyPool = generateMelody(chordSeq, 8).map(m=>snapToScale(m,scaleSet));
+  const totalDur   = barDur * chordSeq.length + 2.5;
+
+  const bassLog=[], harmLog=new Set(), melLog=[];
+  const bassSchedule=[], harmSchedule=[], melSchedule=[];
+
+  const bassEvents = buildBassEvents(dna, chordSeq, barDur, beatDur, bassLog, bassSchedule);
+  const harmEvents = buildHarmonyEvents(dna, chordSeq, barDur, beatDur, harmLog, harmSchedule);
+  const melEvents  = buildMelodyEvents(dna, chordSeq, melodyPool, barDur, beatDur,
+                                        scaleSet, melLog, melSchedule);
 
   return {
     bassEvents, harmEvents, melEvents,
