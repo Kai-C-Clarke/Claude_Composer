@@ -100,23 +100,33 @@ Rhythm: lyrical and unhurried, long values at phrase peaks
 AVOID: short motivic cells, mechanical regularity, harsh dissonance""",
 
     "Vivaldi": """STYLE — VIVALDI:
-V:1 melody: sequences — same pattern repeated a step up/down (D E F A | E F G B | F G A c)
-  Rapid eighth notes throughout. Dotted rhythms for energy.
-  ARPEGGIATE chords by writing notes SEQUENTIALLY — never as brackets:
-  WRONG: (DFA)4  ← block chord, forbidden ✗
-  CORRECT: D2 F2 A2 d2  ← broken arpeggio, ascending ✓
-  CORRECT: d2 A2 F2 D2  ← broken arpeggio, descending ✓
-  Never hold a note longer than 2 units in fast passages.
 
-V:2 bass: DRIVING ALTERNATING BASS — root note then chord, every 2 units:
-  Correct bar in Dm: D,2 (DFA)2 D,2 (DFA)2 |
-  Correct bar in Am: A,,2 (ACE)2 A,,2 (ACE)2 |
-  Correct bar in F:  F,,2 (FAC)2 F,,2 (FAC)2 |
-  Root = 2 units, chord = 2 units, alternating. Total = 8. Always.
+V:1 MELODY — SEQUENCES OF EIGHTH NOTES:
+A sequence means the EXACT same melodic shape repeated starting on a different pitch.
+CORRECT sequence example:
+  D E F A | E F G B | F G A c |   ← same shape (1 1 1 2) up a step each bar ✓
+  d c A F | c B G E | B A F D |   ← same shape descending ✓
+WRONG — no sequence, just random notes:
+  D2 F2 A2 d2 | e2 d2 c2 B2 |   ← different shape each bar ✗
 
-Harmony: chord changes every bar or half-bar, clear I-V-i-IV, circle of fifths
-Rhythm: relentless eighth-note pulse in both voices, NO held notes
-AVOID: bracket chords in melody, held notes over 2 units, lyrical passages, chromaticism"""
+EVERY note in Voice 1 must be an eighth note (1 unit) or dotted rhythm (3+1).
+WRONG: D2 F2 A2 d2  ← all quarter notes, this is a MARCH not Vivaldi ✗
+CORRECT: D E F A d c A F  ← eighth notes, drives forward ✓
+CORRECT: D3 E F3 G A3 B c3 d  ← dotted eighths, energetic ✓
+NEVER write a note with value 2 (quarter note) in fast Vivaldi passages.
+NEVER write (DFA) bracket chords in Voice 1 — ever.
+
+V:2 BASS — ALTERNATING ROOT AND CHORD:
+Each bar alternates: root note (2 units) + chord (2 units) + root (2 units) + chord (2 units) = 8
+CORRECT bar in Dm: D,2 (DFA)2 D,2 (DFA)2 |
+CORRECT bar in Am: A,,2 (ACE)2 A,,2 (ACE)2 |
+CORRECT bar in Gm: G,,2 (GBd)2 G,,2 (GBd)2 |
+WRONG: D,2 D2 F2 A2  ← this spreads notes across the bar, not alternating ✗
+WRONG: D,4 A,4  ← this is just two notes, not driving ✗
+The chord in brackets IS allowed in Voice 2. The root note must be low (comma register).
+
+Harmony: I-V-i-IV progression, chord changes every bar, circle of fifths for sequences
+AVOID: quarter notes in melody, lyrical phrases, chromatic notes, anything slow or sustained"""
 }
 
 # ── Critic checklists ─────────────────────────────────────────────────────────
@@ -161,11 +171,11 @@ CRITIC_CHECKLISTS = {
         {"id": "rich_harmony", "check": "Does the harmony include at least one diminished seventh chord or chromatic inner voice movement?"},
     ],
     "Vivaldi": [
-        {"id": "sequences",    "check": "Does Voice 1 melody contain sequences — the exact same melodic shape repeated starting a step higher or lower? This is essential for Vivaldi."},
-        {"id": "no_brackets_v1","check": "Does Voice 1 completely avoid bracket notation like (DFA)? In Vivaldi, chords must be broken as sequential notes: D2 F2 A2 not (DFA)6"},
-        {"id": "rapid_notes",  "check": "Does Voice 1 use predominantly eighth notes (1-unit) and dotted rhythms, with NO note longer than 2 units?"},
-        {"id": "driving_bass", "check": "Does Voice 2 alternate between a bass root note and a chord every 2 units? Example: D,2 (DFA)2 D,2 (DFA)2 — insistent, never melodic."},
-        {"id": "no_lyrical",   "check": "Does Voice 1 avoid long held notes, lyrical sustained passages, or anything that sounds like Chopin or Tchaikovsky?"},
+        {"id": "sequences",     "check": "Does Voice 1 contain TRUE sequences — the exact same melodic shape (same intervals, same rhythm) repeated starting on a different pitch? Example: D E F A | E F G B | F G A c — same shape up a step. If each bar has a different melodic shape, this FAILS."},
+        {"id": "eighth_notes",  "check": "Does Voice 1 use ONLY eighth notes (value 1) and dotted rhythms? Count the note values in bar 1. If ANY note has value 2 (quarter note) — written as D2, E2, F2 etc — this FAILS. Vivaldi eighth notes look like: D E F A G F E D not D2 F2 A2 d2."},
+        {"id": "no_quarters",   "check": "Scan Voice 1 for the pattern letter-then-2 like D2 or E2 or F2. If more than 2 such quarter notes appear in the first 8 bars, this FAILS. Vivaldi is eighth notes, not quarter notes."},
+        {"id": "no_brackets_v1","check": "Does Voice 1 completely avoid bracket notation like (DFA) or (EGB)? Search Voice 1 for any opening bracket ( followed by notes. If found, this FAILS."},
+        {"id": "driving_bass",  "check": "Does Voice 2 use the alternating root+chord pattern every 2 units? Each bar should look like: D,2 (DFA)2 D,2 (DFA)2 — root(2) chord(2) root(2) chord(2). If Voice 2 looks like D,2 D2 F2 A2 (notes spread across bar) or D,4 A,4 (just two notes), this FAILS."},
     ],
 }
 
