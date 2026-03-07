@@ -22,6 +22,7 @@ import base64
 import tempfile
 import subprocess
 import requests as req
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -207,7 +208,8 @@ def _get_access_token() -> str:
     return creds.token
 
 
-def lyria_generate(prompt: str, negative: str) -> bytes:
+def _lyria_single(prompt: str, negative: str) -> bytes:
+    """Single Lyria API call — returns raw WAV bytes."""
     project  = os.environ.get("GOOGLE_CLOUD_PROJECT")
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 
@@ -224,21 +226,49 @@ def lyria_generate(prompt: str, negative: str) -> bytes:
         "parameters": {}
     }
 
-    token = _get_access_token()
-    r = req.post(url, headers={
-        "Authorization": f"Bearer {token}",
-        "Content-Type":  "application/json",
-    }, json=payload, timeout=120)
+    last_error = None
+    for attempt in range(3):
+        if attempt > 0:
+            import time
+            time.sleep(4 * attempt)
 
-    if r.status_code != 200:
-        raise RuntimeError(f"Lyria API {r.status_code}: {r.text[:400]}")
+        token = _get_access_token()
+        r = req.post(url, headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type":  "application/json",
+        }, json=payload, timeout=120)
 
-    resp = r.json()
-    pred = resp["predictions"][0]
-    audio_b64 = pred.get("audioContent") or pred.get("bytesBase64Encoded")
-    if not audio_b64:
-        raise RuntimeError(f"Unexpected Lyria response keys: {list(pred.keys())}")
-    return base64.b64decode(audio_b64)
+        if r.status_code == 200:
+            resp = r.json()
+            pred = resp["predictions"][0]
+            audio_b64 = (
+                pred.get("audioContent")
+                or pred.get("bytesBase64Encoded")
+                or pred.get("audio", {}).get("content")
+            )
+            if not audio_b64:
+                raise RuntimeError(f"Unexpected Lyria response keys: {list(pred.keys())}")
+            return base64.b64decode(audio_b64)
+
+        last_error = f"Lyria API {r.status_code}: {r.text[:400]}"
+        if r.status_code != 503:
+            break
+
+    raise RuntimeError(last_error)
+
+
+def lyria_generate(prompt: str, negative: str) -> tuple:
+    """
+    Fire two Lyria calls in parallel, return (wav1_bytes, wav2_bytes).
+    Same prompt = same key/style — safe to splice together.
+    Total wait = one generation, not two.
+    """
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f1 = pool.submit(_lyria_single, prompt, negative)
+        f2 = pool.submit(_lyria_single, prompt, negative)
+        wav1 = f1.result()
+        wav2 = f2.result()
+    return wav1, wav2
 
 
 # ──────────────────────────────────────────────────────────
@@ -299,54 +329,65 @@ def find_loop_point(wav_path: str, tempo: int) -> float:
     return best_pos
 
 
-def wav_to_mp3(wav_bytes: bytes, tempo: int = 120, loops: int = 2) -> bytes:
+def wav_to_mp3(wav_bytes: bytes, wav_bytes2: bytes = None, tempo: int = 120) -> bytes:
     with tempfile.TemporaryDirectory() as tmp:
-        wav_in   = os.path.join(tmp, "in.wav")
-        wav_seg  = os.path.join(tmp, "seg.wav")
-        wav_loop = os.path.join(tmp, "loop.wav")
+        wav_in1  = os.path.join(tmp, "in1.wav")
+        wav_in2  = os.path.join(tmp, "in2.wav")
+        wav_seg1 = os.path.join(tmp, "seg1.wav")
+        wav_seg2 = os.path.join(tmp, "seg2.wav")
+        wav_join = os.path.join(tmp, "join.wav")
         wav_verb = os.path.join(tmp, "verb.wav")
         mp3_out  = os.path.join(tmp, "out.mp3")
 
-        with open(wav_in, "wb") as f:
+        cf_secs  = 0.25
+        fade_out = 3.0
+
+        with open(wav_in1, "wb") as f:
             f.write(wav_bytes)
 
-        # ── 1. Find best loop point ──────────────────────────
-        loop_secs   = find_loop_point(wav_in, tempo)
-        cf_secs     = 0.25          # crossfade length at each join
-        fade_out    = 3.0           # final fade-out duration
-
-        # ── 2. Trim to loop point ────────────────────────────
+        # ── 1. Find RMS phrase-end in clip 1 ─────────────────
+        end1 = find_loop_point(wav_in1, tempo)
         subprocess.run(
-            ["sox", wav_in, wav_seg, "trim", "0", str(loop_secs)],
+            ["sox", wav_in1, wav_seg1, "trim", "0", str(end1)],
             capture_output=True, timeout=30
         )
-        seg_src = wav_seg if os.path.exists(wav_seg) else wav_in
+        seg1 = wav_seg1 if os.path.exists(wav_seg1) else wav_in1
 
-        # ── 3. Build looped file with SoX splice (crossfade joins) ──
-        #   splice position,crossfade — positions are cumulative
-        join_points = []
-        for i in range(1, loops + 1):
-            join_points += [f"{loop_secs * i},{cf_secs}"]
+        # ── 2. Find RMS phrase-start in clip 2 ───────────────
+        if wav_bytes2:
+            with open(wav_in2, "wb") as f:
+                f.write(wav_bytes2)
+            # Trim FROM the quietest point so clip 2 begins at a breath
+            start2 = find_loop_point(wav_in2, tempo)
+            subprocess.run(
+                ["sox", wav_in2, wav_seg2, "trim", str(start2)],
+                capture_output=True, timeout=30
+            )
+            seg2 = wav_seg2 if os.path.exists(wav_seg2) else wav_in2
+        else:
+            seg2 = None
 
-        sox_loop_cmd = (
-            ["sox"]
-            + [seg_src] * (loops + 1)          # N+1 copies of segment
-            + [wav_loop]
-            + ["splice", "-q"] + join_points
-        )
-        result = subprocess.run(sox_loop_cmd, capture_output=True, timeout=60)
-        loop_src = wav_loop if result.returncode == 0 else seg_src
+        # ── 3. Splice the two segments ────────────────────────
+        if seg2:
+            splice_cmd = [
+                "sox", seg1, seg2, wav_join,
+                "splice", "-q", f"{end1},{cf_secs}"
+            ]
+            result = subprocess.run(splice_cmd, capture_output=True, timeout=60)
+            joined = wav_join if result.returncode == 0 else seg1
+        else:
+            joined = seg1
 
-        # ── 4. Reverb + fade out ─────────────────────────────
+        # ── 4. Reverb + fade out ──────────────────────────────
         sox_verb = subprocess.run(
-            ["sox", loop_src, wav_verb,
+            ["sox", joined, wav_verb,
              "reverb", "28", "55", "85", "100", "0.1",
              "fade", "t", "0", "0", str(fade_out)],
             capture_output=True, timeout=60
         )
-        src = wav_verb if sox_verb.returncode == 0 else loop_src
+        src = wav_verb if sox_verb.returncode == 0 else joined
 
-        # ── 5. Encode to MP3 ─────────────────────────────────
+        # ── 5. Encode to MP3 ──────────────────────────────────
         lame = subprocess.run(
             ["lame", "-b", "192", "-q", "2", src, mp3_out],
             capture_output=True, timeout=60
@@ -387,10 +428,10 @@ def compose():
         lyria_prompt, lyria_negative = build_lyria_prompt(confucius)
 
         # Step 3: Generate music
-        wav_bytes = lyria_generate(lyria_prompt, lyria_negative)
+        wav1, wav2 = lyria_generate(lyria_prompt, lyria_negative)
 
-        # Step 4: Post-process to MP3
-        mp3_bytes = wav_to_mp3(wav_bytes, tempo=confucius.get("tempo", 120))
+        # Step 4: Post-process — splice two generations, reverb, fade, encode
+        mp3_bytes = wav_to_mp3(wav1, wav_bytes2=wav2, tempo=confucius.get("tempo", 120))
         mp3_b64   = base64.b64encode(mp3_bytes).decode()
 
         return jsonify({
