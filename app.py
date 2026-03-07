@@ -34,7 +34,7 @@ from google.oauth2 import service_account
 # APP
 # ──────────────────────────────────────────────────────────
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=".", static_url_path="")
 CORS(app)
 
 
@@ -262,6 +262,11 @@ def wav_to_mp3(wav_bytes: bytes) -> bytes:
 # ──────────────────────────────────────────────────────────
 # ROUTES
 # ──────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return app.send_static_file("index.html")
+
 
 @app.route("/health")
 def health():
