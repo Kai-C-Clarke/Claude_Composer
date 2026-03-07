@@ -587,7 +587,7 @@ function renderResult(data) {
   document.getElementById('programmeNote').textContent = data.programme_note;
 
   // Meta
-  const keyLabel = data.key.replace('m', ' minor').replace(/^([A-G]b?)$/, '$1 major');
+  const keyLabel = data.key;
   document.getElementById('meta').innerHTML = `
     <div class="meta-item">
       <span class="meta-label">Composer</span>
