@@ -178,6 +178,9 @@ LYRIA_NEGATIVE_PROMPTS = {
     "Tchaikovsky": "vocals, singing, drums, electronic, synthesizer, electric guitar, pop, modern, jazz, piano",
     "Debussy":     "vocals, singing, drums, electronic, synthesizer, electric guitar, pop, modern, trumpet, trombone, violin, orchestra",
 }
+
+
+def build_lyria_prompt(c: dict) -> tuple:
     composer = c.get("composer", "Mozart")
     key      = c.get("key", "C major")
     tempo    = c.get("tempo", 120)
