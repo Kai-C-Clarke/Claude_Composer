@@ -381,7 +381,6 @@ def wav_to_mp3(wav_bytes: bytes, wav_bytes2: bytes = None, tempo: int = 120) -> 
         # ── 4. Pad silence at start + reverb + fade out ──────
         sox_verb = subprocess.run(
             ["sox", joined, wav_verb,
-             "pad", "1.5", "0",
              "reverb", "28", "55", "85", "100", "0.1",
              "fade", "t", "0", "0", str(fade_out)],
             capture_output=True, timeout=60
