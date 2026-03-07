@@ -252,11 +252,11 @@ def wav_to_mp3(wav_bytes: bytes, tempo: int = 120) -> bytes:
         with open(wav_in, "wb") as f:
             f.write(wav_bytes)
 
-        # SoX: 1.5s silence lead-in, reverb, 3s fade-out
+        # SoX: reverb first, then pad 1.5s silence at start, then 3s fade-out
         sox = subprocess.run(
             ["sox", wav_in, wav_verb,
-             "pad", "1.5", "0",
              "reverb", "28", "55", "85", "100", "0.1",
+             "pad", "1.5", "0",
              "fade", "t", "0", "0", "3"],
             capture_output=True, timeout=60
         )
