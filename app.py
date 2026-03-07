@@ -180,7 +180,12 @@ def lyria_generate(prompt: str, negative: str) -> bytes:
     if r.status_code != 200:
         raise RuntimeError(f"Lyria API {r.status_code}: {r.text[:400]}")
 
-    audio_b64 = r.json()["predictions"][0]["audioContent"]
+    resp = r.json()
+    pred = resp["predictions"][0]
+    # Lyria may use 'audioContent' or 'bytesBase64Encoded' depending on API version
+    audio_b64 = pred.get("audioContent") or pred.get("bytesBase64Encoded")
+    if not audio_b64:
+        raise RuntimeError(f"Unexpected Lyria response keys: {list(pred.keys())} | full: {str(resp)[:400]}")
     return base64.b64decode(audio_b64)
 
 
