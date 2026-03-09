@@ -290,6 +290,140 @@ def find_loop_point(wav_path: str, tempo: int) -> float:
     return best_pos
 
 
+def find_midpoint(wav_path: str, tempo: int) -> float:
+    """
+    Find the quietest bar boundary in the middle third of the clip.
+    This becomes the A/B split point for ternary form.
+    """
+    import wave as wavemod
+    import struct
+    import math
+
+    bar_secs = (60.0 / max(tempo, 40)) * 4
+    window   = 0.08
+
+    with wavemod.open(wav_path, 'rb') as wf:
+        rate      = wf.getframerate()
+        channels  = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
+        n_frames  = wf.getnframes()
+        raw       = wf.readframes(n_frames)
+
+    fmt     = {1: 'b', 2: 'h', 4: 'i'}.get(sampwidth, 'h')
+    samples = struct.unpack(f'<{len(raw)//sampwidth}{fmt}', raw)
+    if channels > 1:
+        samples = [sum(samples[i:i+channels])//channels
+                   for i in range(0, len(samples), channels)]
+
+    total_secs = len(samples) / rate
+    win_frames = int(window * rate)
+
+    # Search bar boundaries in the middle third of the clip
+    lo_secs  = total_secs / 3
+    hi_secs  = total_secs * 2 / 3
+    best_pos = total_secs / 2
+    best_rms = float('inf')
+
+    bar = 1
+    while True:
+        pos_secs = bar * bar_secs
+        if pos_secs > hi_secs:
+            break
+        if pos_secs >= lo_secs:
+            centre = int(pos_secs * rate)
+            lo     = max(0, centre - win_frames // 2)
+            hi     = min(len(samples), lo + win_frames)
+            chunk  = samples[lo:hi]
+            if chunk:
+                rms = math.sqrt(sum(s * s for s in chunk) / len(chunk))
+                if rms < best_rms:
+                    best_rms = rms
+                    best_pos = pos_secs
+        bar += 1
+
+    return best_pos
+
+
+def wav_to_ternary_mp3(wav_bytes: bytes, tempo: int = 120) -> bytes:
+    """
+    Split one Lyria WAV at its natural midpoint into A and B sections,
+    then assemble A + B + A with crossfades — ternary (ABA) form.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        wav_in   = os.path.join(tmp, "in.wav")
+        wav_a    = os.path.join(tmp, "a.wav")
+        wav_b    = os.path.join(tmp, "b.wav")
+        wav_aba  = os.path.join(tmp, "aba.wav")
+        wav_verb = os.path.join(tmp, "verb.wav")
+        wav_fade = os.path.join(tmp, "fade.wav")
+        mp3_out  = os.path.join(tmp, "out.mp3")
+
+        cf_secs  = 0.3   # crossfade duration at each join
+        fade_out = 4.0
+
+        with open(wav_in, "wb") as f:
+            f.write(wav_bytes)
+
+        # 1. Find the A/B split point
+        split = find_midpoint(wav_in, tempo)
+
+        # 2. Carve out A section (start → split)
+        subprocess.run(
+            ["sox", wav_in, wav_a, "trim", "0", str(split)],
+            capture_output=True, timeout=30
+        )
+
+        # 3. Carve out B section (split → end)
+        subprocess.run(
+            ["sox", wav_in, wav_b, "trim", str(split)],
+            capture_output=True, timeout=30
+        )
+
+        a = wav_a if os.path.exists(wav_a) else wav_in
+        b = wav_b if os.path.exists(wav_b) else wav_in
+
+        # 4. Assemble A + B + A with crossfades at the two joins
+        #    Join point 1: at split seconds (end of A / start of B)
+        #    Join point 2: at split + b_duration seconds (end of B / start of A)
+        import wave as wm
+        with wm.open(b, 'rb') as wf:
+            b_dur = wf.getnframes() / wf.getframerate()
+
+        j1 = f"{split},{cf_secs}"
+        j2 = f"{split + b_dur},{cf_secs}"
+
+        sox_aba = subprocess.run(
+            ["sox", a, b, a, wav_aba, "splice", "-q", j1, j2],
+            capture_output=True, timeout=90
+        )
+        aba = wav_aba if sox_aba.returncode == 0 else a
+
+        # 5. Reverb
+        subprocess.run(
+            ["sox", aba, wav_verb, "reverb", "28", "55", "85", "100", "0.1"],
+            capture_output=True, timeout=60
+        )
+        verb = wav_verb if os.path.exists(wav_verb) else aba
+
+        # 6. Fade out
+        subprocess.run(
+            ["sox", verb, wav_fade, "fade", "t", "0", "0", str(fade_out)],
+            capture_output=True, timeout=60
+        )
+        final = wav_fade if os.path.exists(wav_fade) else verb
+
+        # 7. Encode to MP3
+        lame = subprocess.run(
+            ["lame", "-b", "192", "-q", "2", final, mp3_out],
+            capture_output=True, timeout=60
+        )
+        if lame.returncode != 0:
+            raise RuntimeError(f"lame: {lame.stderr.decode()}")
+
+        with open(mp3_out, "rb") as f:
+            return f.read()
+
+
 def wav_to_mp3(wav_bytes: bytes, tempo: int = 120, loops: int = 2) -> bytes:
     with tempfile.TemporaryDirectory() as tmp:
         wav_in   = os.path.join(tmp, "in.wav")
@@ -394,6 +528,44 @@ def compose():
             "mood":           confucius.get("mood"),
             "programme_note": confucius.get("programme_note", ""),
             "lyria_prompt":   lyria_prompt,   # shown in UI for transparency
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/compose_ternary", methods=["POST"])
+def compose_ternary():
+    data = request.get_json(force=True)
+    user_prompt = data.get("prompt", "").strip()
+    if not user_prompt:
+        return jsonify({"error": "No prompt provided"}), 400
+
+    try:
+        # Step 1: Confucius interprets
+        confucius = call_confucius(user_prompt)
+
+        # Step 2: Build Lyria prompt
+        lyria_prompt, lyria_negative = build_lyria_prompt(confucius)
+
+        # Step 3: Generate one clip from Lyria
+        wav_bytes = lyria_generate(lyria_prompt, lyria_negative)
+
+        # Step 4: Split and assemble into ABA ternary form
+        mp3_bytes = wav_to_ternary_mp3(wav_bytes, tempo=confucius.get("tempo", 120))
+        mp3_b64   = base64.b64encode(mp3_bytes).decode()
+
+        return jsonify({
+            "success":        True,
+            "mp3":            mp3_b64,
+            "form":           "ABA",
+            "composer":       confucius.get("composer"),
+            "key":            confucius.get("key"),
+            "tempo":          confucius.get("tempo"),
+            "mood":           confucius.get("mood"),
+            "programme_note": confucius.get("programme_note", ""),
+            "lyria_prompt":   lyria_prompt,
         })
 
     except Exception as e:
