@@ -289,7 +289,7 @@ def build_tomita_prompt(user_prompt: str) -> tuple:
         f"{source}"
         f"Moog synthesizer, slow filter sweeps, detuned oscillators, "
         f"Mellotron choir, vast reverb, synthesized birdsong, "
-        f"{mood}, 70 BPM, ambient electronic space music"
+        f"{mood}, 70 BPM, ambient electronic, Isao Tomita style"
     )
 
     negative = (
@@ -414,15 +414,17 @@ def find_loop_point(wav_path: str, tempo: int) -> float:
 
 def find_midpoint(wav_path: str, tempo: int) -> float:
     """
-    Find the quietest bar boundary in the middle third of the clip.
-    This becomes the A/B split point for ternary form.
+    Find the downbeat kick onset closest to the midpoint of the clip.
+    Uses low-frequency energy onset detection so the edit snaps to a
+    natural bar boundary — B section starts clean on beat 1.
     """
     import wave as wavemod
     import struct
-    import math
+    import numpy as np
 
-    bar_secs = (60.0 / max(tempo, 40)) * 4
-    window   = 0.08
+    bar_secs  = (60.0 / max(tempo, 40)) * 4
+    hop_secs  = 0.01        # 10ms analysis frames
+    pre_roll  = 0.02        # step back 20ms before the onset for the splice
 
     with wavemod.open(wav_path, 'rb') as wf:
         rate      = wf.getframerate()
@@ -432,41 +434,66 @@ def find_midpoint(wav_path: str, tempo: int) -> float:
         raw       = wf.readframes(n_frames)
 
     fmt     = {1: 'b', 2: 'h', 4: 'i'}.get(sampwidth, 'h')
-    samples = struct.unpack(f'<{len(raw)//sampwidth}{fmt}', raw)
+    samples = np.array(struct.unpack(f'<{len(raw)//sampwidth}{fmt}', raw),
+                       dtype=np.float32)
     if channels > 1:
-        samples = [sum(samples[i:i+channels])//channels
-                   for i in range(0, len(samples), channels)]
+        samples = samples.reshape(-1, channels).mean(axis=1)
 
     total_secs = len(samples) / rate
-    win_frames = int(window * rate)
+    hop        = max(1, int(hop_secs * rate))
 
-    # Search bar boundaries in the middle third of the clip
+    # Low-pass: keep only low-frequency energy by downsampling envelope
+    # Square the signal and compute RMS over each hop window
+    n_hops  = len(samples) // hop
+    energy  = np.array([
+        np.sqrt(np.mean(samples[i*hop:(i+1)*hop] ** 2))
+        for i in range(n_hops)
+    ])
+
+    # Onset strength = positive first-order difference of energy
+    onset_strength = np.maximum(0, np.diff(energy, prepend=energy[0]))
+
+    # Find onset peaks: local maxima above mean + 1 std
+    threshold = onset_strength.mean() + onset_strength.std() * 0.8
+    peaks = []
+    for i in range(1, len(onset_strength) - 1):
+        if (onset_strength[i] > threshold and
+                onset_strength[i] >= onset_strength[i-1] and
+                onset_strength[i] >= onset_strength[i+1]):
+            peaks.append(i * hop_secs)  # seconds
+
+    # Search bar boundaries in the middle third
     lo_secs  = total_secs / 3
     hi_secs  = total_secs * 2 / 3
-    best_pos = total_secs / 2
-    best_rms = float('inf')
+    midpoint = total_secs / 2
 
+    # For each bar boundary in the middle third, find the closest onset peak
     bar = 1
+    best_pos  = midpoint
+    best_dist = float('inf')
+
     while True:
-        pos_secs = bar * bar_secs
-        if pos_secs > hi_secs:
+        bar_pos = bar * bar_secs
+        if bar_pos > hi_secs:
             break
-        if pos_secs >= lo_secs:
-            centre = int(pos_secs * rate)
-            lo     = max(0, centre - win_frames // 2)
-            hi     = min(len(samples), lo + win_frames)
-            chunk  = samples[lo:hi]
-            if chunk:
-                rms = math.sqrt(sum(s * s for s in chunk) / len(chunk))
-                if rms < best_rms:
-                    best_rms = rms
-                    best_pos = pos_secs
+        if bar_pos >= lo_secs:
+            # Find nearest onset peak to this bar boundary
+            for peak in peaks:
+                dist = abs(peak - bar_pos)
+                # Only consider peaks within half a bar of the boundary
+                if dist < bar_secs * 0.5:
+                    # Prefer the bar boundary closest to the midpoint
+                    mid_dist = abs(bar_pos - midpoint)
+                    if mid_dist < best_dist:
+                        best_dist = mid_dist
+                        # Step back slightly before the onset for a clean splice
+                        best_pos  = max(0, peak - pre_roll)
         bar += 1
 
     return best_pos
 
 
-def wav_to_ternary_mp3(wav_bytes: bytes, tempo: int = 120) -> bytes:
+def wav_to_ternary_mp3(wav_bytes: bytes, tempo: int = 120, cf_secs: float = 0.3) -> bytes:
     """
     Split one Lyria WAV at its natural midpoint into A and B sections,
     then assemble A + B + A with crossfades — ternary (ABA) form.
@@ -480,7 +507,7 @@ def wav_to_ternary_mp3(wav_bytes: bytes, tempo: int = 120) -> bytes:
         wav_fade = os.path.join(tmp, "fade.wav")
         mp3_out  = os.path.join(tmp, "out.mp3")
 
-        cf_secs  = 0.3   # crossfade duration at each join
+        # cf_secs passed as parameter
         fade_out = 4.0
 
         with open(wav_in, "wb") as f:
@@ -612,7 +639,7 @@ def wav_to_mp3(wav_bytes: bytes, tempo: int = 120, loops: int = 2) -> bytes:
 
 @app.route("/")
 def index():
-    return "Claude Composer is running."
+    return app.send_static_file("index.html")
 
 
 @app.route("/health")
@@ -673,7 +700,7 @@ def compose_tomita():
 
         # Step 3: Assemble into ABA ternary form
         # Use a gentle tempo for split-point calculation — Tomita is always slow
-        mp3_bytes = wav_to_ternary_mp3(wav_bytes, tempo=72)
+        mp3_bytes = wav_to_ternary_mp3(wav_bytes, tempo=72, cf_secs=0.08)
         mp3_b64   = base64.b64encode(mp3_bytes).decode()
 
         return jsonify({
