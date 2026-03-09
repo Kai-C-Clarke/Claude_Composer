@@ -276,20 +276,20 @@ def build_tomita_prompt(user_prompt: str) -> tuple:
     # Detect classical source
     source = ""
     if "debussy" in prompt_lower:
-        source = "impressionist tone poem, liquid blurred harmonies, analogue electronics, "
+        source = "impressionist tone poem translated into analogue electronics, liquid blurred harmonies, "
     elif "holst" in prompt_lower or "planet" in prompt_lower:
-        source = "cosmic orchestral sweep, vast synthesizer layers, planetary scale, "
+        source = "cosmic orchestral sweep translated into vast synthesizer layers, planetary scale, "
     elif "mussorgsky" in prompt_lower or "picture" in prompt_lower:
-        source = "bold vivid themes, rich synthesizer colours, heavy and architectural, "
+        source = "bold vivid themes translated into rich synthesizer colours, heavy and architectural, "
     elif "ravel" in prompt_lower:
-        source = "glittering orchestral textures, shimmering filter sweeps, bell tones, "
+        source = "glittering orchestral textures translated into shimmering filter sweeps and bell tones, "
 
     # Keep prompt concise — Lyria rejects over-specified prompts
     prompt = (
         f"{source}"
         f"Moog synthesizer, slow filter sweeps, detuned oscillators, "
         f"Mellotron choir, vast reverb, synthesized birdsong, "
-        f"{mood}, 70 BPM, ambient electronic space music"
+        f"{mood}, 70 BPM, ambient electronic, Isao Tomita style"
     )
 
     negative = (
