@@ -62,6 +62,10 @@ Composer selection guide (based on musical energy):
 - MEDIUM energy      → Bach (intellect, counterpoint), Mozart (elegance, wit)
 - LOW energy/tempo   → Chopin (intimate nocturne), Tchaikovsky (sweeping romance), Debussy (impressionist mist)
 
+Tempo guidance: specify the FELT beat — the pulse a conductor would beat — not the fastest note value played.
+A Vivaldi allegro with rapid semiquaver violin figures should be 80-120 BPM, not 160.
+A Bach fugue with busy counterpoint should be 60-90 BPM. Reserve 140+ only for genuinely fast dance forms.
+
 Do not select the same composer twice in a row. Vary your choices."""
 
 
