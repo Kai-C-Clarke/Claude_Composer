@@ -289,7 +289,7 @@ def build_tomita_prompt(user_prompt: str) -> tuple:
         f"{source}"
         f"Moog synthesizer, slow filter sweeps, detuned oscillators, "
         f"Mellotron choir, vast reverb, synthesized birdsong, "
-        f"{mood}, 70 BPM, ambient electronic space music"
+        f"{mood}, gentle fade in introduction, 70 BPM, ambient electronic space music"
     )
 
     negative = (
@@ -553,7 +553,7 @@ def wav_to_ternary_mp3(wav_bytes: bytes, tempo: int = 120, cf_secs: float = 0.3)
 
         # 6. Fade out
         subprocess.run(
-            ["sox", verb, wav_fade, "fade", "t", "0", "0", str(fade_out)],
+            ["sox", verb, wav_fade, "fade", "t", "2", "0", str(fade_out)],
             capture_output=True, timeout=60
         )
         final = wav_fade if os.path.exists(wav_fade) else verb
@@ -613,7 +613,7 @@ def wav_to_mp3(wav_bytes: bytes, tempo: int = 120, loops: int = 2) -> bytes:
         # 5. Fade out last 3s — SoX knows the exact duration now
         wav_fade = os.path.join(tmp, "fade.wav")
         subprocess.run(
-            ["sox", verb, wav_fade, "fade", "t", "0", "0", str(fade_out)],
+            ["sox", verb, wav_fade, "fade", "t", "2", "0", str(fade_out)],
             capture_output=True, timeout=60
         )
         final = wav_fade if os.path.exists(wav_fade) else verb
