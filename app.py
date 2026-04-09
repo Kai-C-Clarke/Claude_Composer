@@ -432,31 +432,56 @@ def run_news_pipeline():
     start = datetime.utcnow()
 
     # 1. Gather
-    all_articles = gather_all_sources()
+    try:
+        all_articles = gather_all_sources()
+    except Exception as e:
+        logging.error(f"[NEWS] gather_all_sources exception: {e}")
+        return False
+
     if not all_articles:
         logging.error("[NEWS] No articles gathered — aborting")
         return False
+    logging.info(f"[NEWS] Gathered {len(all_articles)} articles")
 
     # 2. Select
-    selected = select_stories(all_articles)
+    try:
+        selected = select_stories(all_articles)
+    except Exception as e:
+        logging.error(f"[NEWS] select_stories exception: {e}")
+        return False
+
     if not selected:
         logging.error("[NEWS] No stories selected — aborting")
         return False
+    logging.info(f"[NEWS] Selected {len(selected)} stories")
 
     # 3. Deliberate + write + illustrate
     built_stories = []
     for i, story in enumerate(selected[:3]):
         logging.info(f"[NEWS] Processing story {i+1}: {story['slug']}")
 
-        voices  = deliberate_story(story)
-        article = write_article(story, voices)
+        try:
+            voices = deliberate_story(story)
+        except Exception as e:
+            logging.error(f"[NEWS] deliberate_story exception story {i+1}: {e}")
+            voices = {}
+
+        try:
+            article = write_article(story, voices)
+        except Exception as e:
+            logging.error(f"[NEWS] write_article exception story {i+1}: {e}")
+            article = {}
+
         if not article:
             logging.warning(f"[NEWS] Article writing failed for story {i+1}")
             continue
 
         image_url = ""
         if article.get("image_prompt"):
-            image_url = generate_image(article["image_prompt"])
+            try:
+                image_url = generate_image(article["image_prompt"])
+            except Exception as e:
+                logging.warning(f"[NEWS] generate_image exception: {e}")
 
         built_stories.append({
             "slug":         story["slug"],
@@ -471,6 +496,7 @@ def run_news_pipeline():
             "voices":       voices,
             "sources":      article.get("sources_used", []),
         })
+        logging.info(f"[NEWS] Story {i+1} built OK. Image: {'YES' if image_url else 'NO'}")
 
     if not built_stories:
         logging.error("[NEWS] No stories built — aborting")
