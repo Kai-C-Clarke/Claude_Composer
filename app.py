@@ -55,8 +55,8 @@ CORS(app)
 CONSILIUM_KEY     = os.environ.get("CONSILIUM_KEY", "3a51b60e9b78720f8528412db52e7ef3")
 NEWSAPI_KEY       = os.environ.get("NEWSAPI_KEY", "")
 GROK_API_KEY      = os.environ.get("GROK_API_KEY", "")
-GROK_CHAT_MODEL   = "grok-3"
-GROK_IMAGE_MODEL  = "grok-2-image"
+GROK_CHAT_MODEL   = "grok-4-1-fast-reasoning"
+GROK_IMAGE_MODEL  = "grok-imagine-image"
 CONSILIUM_API_URL = os.environ.get("CONSILIUM_API_URL", "https://consilium-d1fw.onrender.com")
 
 NEWS_STATE_PATH   = "/tmp/consilium_news.json"
