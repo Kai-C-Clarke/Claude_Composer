@@ -72,11 +72,10 @@ MODELS = {
 
 NEWS_RSS_FEEDS = {
     "Al Jazeera English": "https://www.aljazeera.com/xml/rss/all.xml",
-    "Press TV":           "https://www.presstv.ir/rss",
     "BBC World":          "http://feeds.bbci.co.uk/news/world/rss.xml",
-    "Reuters World":      "https://feeds.reuters.com/reuters/worldNews",
     "Arab News":          "https://www.arabnews.com/rss.xml",
-    "Haaretz":            "https://www.haaretz.com/cmlink/1.628764",
+    "France 24":          "https://www.france24.com/en/rss",
+    "DW World":           "https://rss.dw.com/rdf/rss-en-world",
 }
 
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=war+OR+conflict+OR+economy+OR+climate&mode=artlist&maxrecords=10&format=json"
@@ -257,7 +256,7 @@ Articles:
                 "max_tokens":  1000,
                 "temperature": 0.3
             },
-            timeout=30
+            timeout=60
         )
         raw = r.json()["choices"][0]["message"]["content"].strip()
         raw = re.sub(r"^```json\s*", "", raw)
@@ -415,11 +414,18 @@ def generate_image(prompt_text):
             "https://api.x.ai/v1/images/generations",
             headers={"Authorization": f"Bearer {GROK_API_KEY}", "Content-Type": "application/json"},
             json={"model": GROK_IMAGE_MODEL, "prompt": prompt_text, "n": 1},
-            timeout=30
+            timeout=60
         )
-        url = r.json()["data"][0]["url"]
-        logging.info(f"[NEWS] Image generated: {url[:60]}...")
-        return url
+        resp = r.json()
+        logging.info(f"[NEWS] Image API response keys: {list(resp.keys())}")
+        # Handle both response formats
+        if "data" in resp and resp["data"]:
+            url = resp["data"][0].get("url") or resp["data"][0].get("b64_json", "")
+            if url:
+                logging.info(f"[NEWS] Image generated: {url[:60]}...")
+                return url
+        logging.warning(f"[NEWS] Image API unexpected response: {str(resp)[:200]}")
+        return ""
     except Exception as e:
         logging.warning(f"[NEWS] Image generation failed: {e}")
         return ""
