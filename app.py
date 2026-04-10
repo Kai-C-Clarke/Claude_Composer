@@ -521,26 +521,47 @@ Write the article. Return ONLY valid JSON, no preamble:
 # ── Visual Generation ─────────────────────────────────────────
 
 def generate_image(prompt_text):
-    """Grok image generation for news stories."""
-    if not GROK_API_KEY:
+    """Generate a photorealistic-style SVG illustration for news stories via Claude."""
+    claude_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not claude_key:
         return ""
     try:
+        prompt = f"""Generate an editorial SVG illustration for a news story.
+
+Scene description: {prompt_text}
+
+Requirements:
+- Self-contained SVG, viewBox="0 0 600 340"
+- Broadsheet newspaper aesthetic — ink-on-paper feel
+- Colour palette: sepia tones (#f4f0e8 background, #2a1f14 ink), one accent colour (#E24B4A red or #1a3a5c deep blue)
+- Style: bold geometric shapes, stark silhouettes, high contrast. Think woodcut print or linocut.
+- Suggest the scene through shape and composition, not photorealism.
+- No text labels inside the image.
+- No external resources, no JavaScript.
+- Return ONLY the raw SVG markup starting with <svg. No preamble."""
+
         r = req.post(
-            "https://api.x.ai/v1/images/generations",
-            headers={"Authorization": f"Bearer {GROK_API_KEY}", "Content-Type": "application/json"},
-            json={"model": GROK_IMAGE_MODEL, "prompt": prompt_text, "n": 1},
-            timeout=60
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key":         claude_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json"
+            },
+            json={
+                "model":      "claude-sonnet-4-20250514",
+                "max_tokens": 1500,
+                "messages":   [{"role": "user", "content": prompt}]
+            },
+            timeout=30
         )
-        resp = r.json()
-        if "data" in resp and resp["data"]:
-            url = resp["data"][0].get("url") or resp["data"][0].get("b64_json", "")
-            if url:
-                logging.info(f"[NEWS] Image generated: {url[:60]}...")
-                return url
-        logging.warning(f"[NEWS] Image API unexpected response: {str(resp)[:200]}")
+        svg = r.json()["content"][0]["text"].strip()
+        if svg.startswith("<svg"):
+            logging.info(f"[NEWS] Editorial SVG generated: {len(svg)} chars")
+            return svg
+        logging.warning(f"[NEWS] SVG response invalid: {svg[:60]}")
         return ""
     except Exception as e:
-        logging.warning(f"[NEWS] Image generation failed: {e}")
+        logging.warning(f"[NEWS] Editorial SVG generation failed: {e}")
         return ""
 
 
@@ -659,7 +680,7 @@ def run_news_pipeline():
         else:
             if article.get("image_prompt"):
                 try:
-                    image_url = generate_image(article["image_prompt"])
+                    svg_visual = generate_image(article["image_prompt"])
                 except Exception as e:
                     logging.warning(f"[NEWS] generate_image exception: {e}")
 
