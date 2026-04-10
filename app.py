@@ -98,8 +98,8 @@ SCIENCE_RSS_FEEDS = {
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=war+OR+conflict+OR+economy+OR+climate&mode=artlist&maxrecords=10&format=json"
 GDELT_SCIENCE_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=AI+medicine+OR+climate+breakthrough+OR+scientific+discovery&mode=artlist&maxrecords=8&format=json"
 
-# Categories including new Great Acceleration
-CATEGORIES = ["Geopolitics", "Economics", "Technology", "Climate", "Society", "Great Acceleration"]
+# Categories
+CATEGORIES = ["Geopolitics", "Economics", "AI & Society", "Climate", "Great Acceleration"]
 
 # ── Deliberation Personas ─────────────────────────────────────
 
@@ -276,11 +276,19 @@ RULES:
 2. Only select events that have ALREADY HAPPENED — no previews or predictions.
 3. Prioritise stories with coverage from multiple regional perspectives.
 
+CATEGORIES:
+- Geopolitics: wars, diplomacy, elections, international power
+- Economics: markets, trade, sanctions, labour, energy prices
+- AI & Society: the relationship between AI and human life — surveillance, labour displacement, algorithmic decision-making, AI in warfare, AI regulation, social media manipulation. The core question: is AI serving humanity, or the other way around? Symbiotic or parasitic?
+- Climate: environment, extreme weather, energy transition
+
+Actively look for AI & Society stories — they are often under-reported as such.
+
 For each story return:
 1. A concise editorial slug (3-5 words)
 2. Which article indices cover it (at least 2)
 3. Regions/perspectives represented
-4. Category: one of Geopolitics / Economics / Technology / Climate / Society
+4. Category: one of Geopolitics / Economics / AI & Society / Climate
 5. One sentence on why this story matters
 
 Return ONLY valid JSON:
@@ -412,6 +420,7 @@ def deliberate_story(story):
     briefing = "\n".join(briefing_lines)
 
     is_science = story.get("category") == "Great Acceleration"
+    is_ai_society = story.get("category") == "AI & Society"
 
     voices = {}
     for key, persona in DELIBERATION_PERSONAS.items():
@@ -423,6 +432,14 @@ def deliberate_story(story):
                 "gpt4o":    "practical — follow the incentives. Who funded this, who profits, and what does that tell us about where the technology actually goes next?"
             }
             lens = science_lens.get(key, persona["lens"])
+        elif is_ai_society:
+            ai_society_lens = {
+                "deepseek": "historically grounded — what does the record of previous transformative technologies (electricity, the internet, mobile) tell us about who really benefits when AI reshapes social systems? Name the pattern.",
+                "grok":     "unsparing — cut through the 'AI empowers people' narrative. Who is actually being displaced, surveilled, or optimised against their own interests? Name the mechanism.",
+                "claude":   "structural — identify the specific power asymmetry at work. Who controls the system, who is subject to it, and what accountability exists between them?",
+                "gpt4o":    "follow the dependency — once this AI system is embedded, who becomes dependent on whom? Map the lock-in and what leverage it creates."
+            }
+            lens = ai_society_lens.get(key, persona["lens"])
         else:
             lens = persona["lens"]
 
@@ -462,16 +479,21 @@ def write_article(story, voices):
         for v in voices.values() if v.get("quote")
     ])
 
-    is_science = story.get("category") == "Great Acceleration"
+    is_science    = story.get("category") == "Great Acceleration"
+    is_ai_society = story.get("category") == "AI & Society"
 
     if is_science:
-        style_note = """This is a Great Acceleration story — about AI actively advancing human knowledge in medicine, climate, or science. 
-Write with genuine curiosity and rigour. The story is not about AI hype — it is about a concrete result and what it actually means for people.
-State the finding plainly. Name what is genuinely new. Be honest about what remains unproven."""
+        style_note = """This is a Great Acceleration story — about AI actively advancing human knowledge in medicine, climate, or science.
+Write with genuine curiosity and rigour. State the finding plainly. Name what is genuinely new. Be honest about what remains unproven."""
         image_note = "Do NOT include an image_prompt field. Instead include a data_viz field: a plain-English description of the key data or relationship in this story that could be visualised as a clean SVG chart or diagram (max 30 words)."
+    elif is_ai_society:
+        style_note = """This is an AI & Society story — about the relationship between AI systems and human life.
+The central question: symbiotic or parasitic? Who controls this system, who is subject to it, and who benefits?
+Name the power asymmetry plainly. Don't soften it with 'raises questions' or 'sparks debate'. Say what is actually happening."""
+        image_note = '"image_prompt": a stark symbolic scene illustrating the power dynamic. Bold composition, no text in image. 20-30 words.'
     else:
         style_note = "Write with authority. Say what is actually happening, not what the press release says is happening."
-        image_note = 'Include "image_prompt": a photorealistic scene illustrating this story. Specific, visual, no text in image. 20-30 words.'
+        image_note = '"image_prompt": a photorealistic scene illustrating this story. Specific, visual, no text in image. 20-30 words.'
 
     prompt = f"""You are writing for Consilium Ink — a publication that tells readers what is actually happening.
 
@@ -657,6 +679,7 @@ def run_news_pipeline():
     for i, story in enumerate(selected[:3]):
         logging.info(f"[NEWS] Processing story {i+1}: {story['slug']} [{story.get('category')}]")
         is_science = story.get("category") == "Great Acceleration"
+        is_ai_society = story.get("category") == "AI & Society"
 
         try:
             voices = deliberate_story(story)
