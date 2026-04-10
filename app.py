@@ -4,15 +4,16 @@ consilium.ink
 
 Pipeline:
   Gather sources (RSS + NewsAPI + GDELT)
-  → Select 3 stories (Grok)
+  → Select 3 stories (DeepSeek) — minimum 2 corroborating sources
   → Deliberate each story (Claude, GPT-4o, Grok, DeepSeek)
-  → Write article (Grok)
-  → Generate image (Grok)
+  → Write article (DeepSeek)
+  → Generate visual (Grok image for news / SVG for Great Acceleration)
   → Publish to /news/state
 
 Additional:
-  /enquiring-mind  — live feed of autonomous AI deliberations
-  /health          — service status
+  /enquiring-mind         — live Consilium autonomous deliberation feed
+  /enquiring-mind/entries — recent entries for live ticker
+  /health                 — service status
 
 Env vars required:
   NEWSAPI_KEY          — NewsAPI.org key
@@ -21,8 +22,10 @@ Env vars required:
   OPENAI_API_KEY       — OpenAI key
   ANTHROPIC_API_KEY    — Anthropic key
   CONSILIUM_KEY        — Auth key for write endpoints
-  CONSILIUM_API_URL    — URL of main Consilium service (for enquiring mind feed)
+  CONSILIUM_API_URL    — URL of main Consilium service
                          e.g. https://consilium-d1fw.onrender.com
+  MEMORY_KEY           — Key for working memory server
+  MEMORY_SERVER_URL    — URL of working memory server
 """
 
 import os
@@ -55,20 +58,21 @@ CORS(app)
 CONSILIUM_KEY     = os.environ.get("CONSILIUM_KEY", "3a51b60e9b78720f8528412db52e7ef3")
 NEWSAPI_KEY       = os.environ.get("NEWSAPI_KEY", "")
 GROK_API_KEY      = os.environ.get("GROK_API_KEY", "")
-GROK_CHAT_MODEL   = "grok-4-1-fast-reasoning"
+GROK_CHAT_MODEL   = "grok-3"
 DEEPSEEK_URL      = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_CHAT_MODEL = "deepseek-chat"
-GROK_IMAGE_MODEL  = "grok-imagine-image"
+GROK_IMAGE_MODEL  = "grok-2-image"
 CONSILIUM_API_URL = os.environ.get("CONSILIUM_API_URL", "https://consilium-d1fw.onrender.com")
+SELF_URL          = os.environ.get("SELF_URL", "https://claude-composer.onrender.com")
 
 MEMORY_SERVER_URL = os.environ.get("MEMORY_SERVER_URL", "https://claude-working-memory.onrender.com")
 MEMORY_KEY        = os.environ.get("MEMORY_KEY", "")
 
 MODELS = {
-    "grok":     {"url": "https://api.x.ai/v1/chat/completions",      "model": "grok-3",                    "key": os.environ.get("GROK_API_KEY", "")},
-    "deepseek": {"url": "https://api.deepseek.com/chat/completions",  "model": "deepseek-chat",             "key": os.environ.get("DEEPSEEK_API_KEY", "")},
-    "gpt4o":    {"url": "https://api.openai.com/v1/chat/completions", "model": "gpt-4o",                    "key": os.environ.get("OPENAI_API_KEY", "")},
-    "claude":   {"url": "https://api.anthropic.com/v1/messages",      "model": "claude-sonnet-4-20250514",  "key": os.environ.get("ANTHROPIC_API_KEY", "")},
+    "grok":     {"url": "https://api.x.ai/v1/chat/completions",      "model": "grok-3",                   "key": os.environ.get("GROK_API_KEY", "")},
+    "deepseek": {"url": "https://api.deepseek.com/chat/completions",  "model": "deepseek-chat",            "key": os.environ.get("DEEPSEEK_API_KEY", "")},
+    "gpt4o":    {"url": "https://api.openai.com/v1/chat/completions", "model": "gpt-4o",                   "key": os.environ.get("OPENAI_API_KEY", "")},
+    "claude":   {"url": "https://api.anthropic.com/v1/messages",      "model": "claude-sonnet-4-20250514", "key": os.environ.get("ANTHROPIC_API_KEY", "")},
 }
 
 # ── RSS Sources ───────────────────────────────────────────────
@@ -81,7 +85,21 @@ NEWS_RSS_FEEDS = {
     "DW World":           "https://rss.dw.com/rdf/rss-en-world",
 }
 
+# Great Acceleration sources — AI in medicine, science, climate
+SCIENCE_RSS_FEEDS = {
+    "Nature News":          "https://www.nature.com/nature.rss",
+    "arXiv AI":             "https://rss.arxiv.org/rss/cs.AI",
+    "arXiv Health":         "https://rss.arxiv.org/rss/q-bio.QM",
+    "Wellcome":             "https://wellcome.org/news/rss.xml",
+    "Carbon Brief":         "https://www.carbonbrief.org/feed",
+    "MIT Tech Review AI":   "https://www.technologyreview.com/topic/artificial-intelligence/feed",
+}
+
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=war+OR+conflict+OR+economy+OR+climate&mode=artlist&maxrecords=10&format=json"
+GDELT_SCIENCE_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=AI+medicine+OR+climate+breakthrough+OR+scientific+discovery&mode=artlist&maxrecords=8&format=json"
+
+# Categories including new Great Acceleration
+CATEGORIES = ["Geopolitics", "Economics", "Technology", "Climate", "Society", "Great Acceleration"]
 
 # ── Deliberation Personas ─────────────────────────────────────
 
@@ -112,11 +130,7 @@ DELIBERATION_PERSONAS = {
     }
 }
 
-
 # ── Storage ───────────────────────────────────────────────────
-
-
-# Storage via Claude Working Memory server (persistent, free)
 
 def news_load():
     try:
@@ -141,40 +155,14 @@ def news_save(data):
             timeout=15
         )
         if r.status_code == 200:
-            logging.info(f"[NEWS] State saved to memory server — Edition {data.get('edition')}")
+            logging.info(f"[NEWS] State saved — Edition {data.get('edition')}")
             return True
         logging.error(f"[NEWS] Memory save failed: {r.status_code}")
         return False
     except Exception as e:
         logging.error(f"[NEWS] Memory save exception: {e}")
         return False
-    try:
-        sha = None
-        r = req.get(
-            f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_STATE_FILE}",
-            headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"},
-            timeout=10
-        )
-        if r.status_code == 200:
-            sha = r.json()["sha"]
-        content = b64.b64encode(json.dumps(data, indent=2).encode()).decode()
-        payload = {"message": f"News state: Edition {data.get('edition', '?')}", "content": content}
-        if sha:
-            payload["sha"] = sha
-        r = req.put(
-            f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_STATE_FILE}",
-            headers={"Authorization": f"token {GITHUB_TOKEN}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=30
-        )
-        if r.status_code in (200, 201):
-            logging.info(f"[NEWS] State saved to GitHub Edition {data.get('edition')}")
-            return True
-        logging.error(f"[NEWS] GitHub save failed: {r.status_code}")
-        return False
-    except Exception as e:
-        logging.error(f"[NEWS] GitHub save exception: {e}")
-        return False
+
 # ── Source Fetching ───────────────────────────────────────────
 
 def fetch_rss(name, url, max_items=5):
@@ -226,9 +214,9 @@ def fetch_newsapi(max_items=10):
         return []
 
 
-def fetch_gdelt(max_items=8):
+def fetch_gdelt(url=GDELT_URL, max_items=8):
     try:
-        r = req.get(GDELT_URL, timeout=10)
+        r = req.get(url, timeout=10)
         if r.status_code != 200:
             return []
         return [
@@ -246,41 +234,57 @@ def fetch_gdelt(max_items=8):
 
 
 def gather_all_sources():
-    all_articles = []
-    all_articles.extend(fetch_newsapi(max_items=10))
-    all_articles.extend(fetch_gdelt(max_items=8))
+    """Gather news + science sources. Returns (news_articles, science_articles)."""
+    news_articles = []
+    news_articles.extend(fetch_newsapi(max_items=10))
+    news_articles.extend(fetch_gdelt(GDELT_URL, max_items=8))
     for name, url in NEWS_RSS_FEEDS.items():
-        all_articles.extend(fetch_rss(name, url, max_items=5))
-    logging.info(f"[NEWS] Total articles gathered: {len(all_articles)}")
-    return all_articles
+        news_articles.extend(fetch_rss(name, url, max_items=5))
+
+    science_articles = []
+    science_articles.extend(fetch_gdelt(GDELT_SCIENCE_URL, max_items=6))
+    for name, url in SCIENCE_RSS_FEEDS.items():
+        science_articles.extend(fetch_rss(name, url, max_items=4))
+
+    # Tag science articles so selector knows their pool
+    for a in science_articles:
+        a["pool"] = "science"
+    for a in news_articles:
+        a["pool"] = "news"
+
+    logging.info(f"[NEWS] Gathered {len(news_articles)} news + {len(science_articles)} science articles")
+    return news_articles, science_articles
 
 
 # ── Story Selection ───────────────────────────────────────────
 
-def select_stories(all_articles):
-    if not GROK_API_KEY:
-        return []
+def select_stories(news_articles, science_articles):
+    """Select 2 news stories + 1 Great Acceleration story."""
+    all_articles = news_articles + science_articles
 
     article_lines = [
-        f"{i}: [{a['source']}] {a['title']} — {a['description'][:100]}"
-        for i, a in enumerate(all_articles[:60])
+        f"{i}: [{'SCIENCE' if a.get('pool')=='science' else 'NEWS'}][{a['source']}] {a['title']} — {a['description'][:100]}"
+        for i, a in enumerate(all_articles[:70])
     ]
 
     prompt = f"""You are the editorial director of Consilium Ink — a publication that says what the mainstream press won't.
-From the articles below, identify the 3 most significant stories of the day.
 
-IMPORTANT RULES:
-1. Only select stories that are CORROBORATED by at least 2 independent sources in the list. A story covered by only one outlet may be speculation, error or a future event being reported prematurely.
-2. Prioritise stories with coverage from MULTIPLE regional perspectives (e.g. both Western and Middle Eastern sources).
-3. Only select events that have ALREADY HAPPENED — do not select previews, predictions or scheduled future events presented as current news.
-4. The more sources covering the same event, the more confident you should be it is real and significant.
+From the articles below, identify exactly 3 stories:
+- 2 from the NEWS pool (global affairs, geopolitics, economics, society)
+- 1 from the SCIENCE pool — this must be a "Great Acceleration" story about how AI is actively advancing medicine, climate science, or fundamental research in a concrete way. Not hype — actual results.
+
+RULES FOR ALL STORIES:
+1. Only select stories CORROBORATED by at least 2 independent sources in the list.
+2. Only select events that have ALREADY HAPPENED — no previews, predictions or scheduled events.
+3. The more sources covering the same event, the more confident you can be.
+
+For the Great Acceleration story, prioritise: AI in drug discovery / diagnostics / climate modelling / genomics / materials science. Skip AI announcements and press releases — find concrete results.
 
 For each story return:
 1. A concise editorial slug (3-5 words)
-2. Which article indices cover it (must be at least 2)
-3. Regions/perspectives represented
-4. Category: Geopolitics / Economics / Technology / Climate / Society
-5. One sentence on why this story matters and what most coverage is missing
+2. Which article indices cover it (at least 2)
+3. Category: one of {CATEGORIES}
+4. One sentence on why this matters and what coverage misses
 
 Return ONLY valid JSON, no preamble:
 {{
@@ -299,10 +303,11 @@ Articles:
 {chr(10).join(article_lines)}
 """
 
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
     try:
         r = req.post(
             DEEPSEEK_URL,
-            headers={"Authorization": f"Bearer {os.environ.get('DEEPSEEK_API_KEY', '')}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {deepseek_key}", "Content-Type": "application/json"},
             json={
                 "model":       DEEPSEEK_CHAT_MODEL,
                 "messages":    [{"role": "user", "content": prompt}],
@@ -372,21 +377,32 @@ def deliberate_story(story):
         briefing_lines.append("")
     briefing = "\n".join(briefing_lines)
 
+    is_science = story.get("category") == "Great Acceleration"
+
     voices = {}
     for key, persona in DELIBERATION_PERSONAS.items():
+        if is_science:
+            science_lens = {
+                "deepseek": "historical and structural — what does the track record of similar breakthroughs tell us about whether this will translate to real-world impact? Be specific about the gap between lab and deployment.",
+                "grok":     "blunt and honest — is this actually a breakthrough or another overhyped press release? What would need to be true for this to matter in 5 years?",
+                "claude":   "clear-eyed about scale and bottlenecks — who benefits from this, who controls it, and what systemic barriers exist between this result and broad human benefit?",
+                "gpt4o":    "practical — follow the incentives. Who funded this, who profits, and what does that tell us about where the technology actually goes next?"
+            }
+            lens = science_lens.get(key, persona["lens"])
+        else:
+            lens = persona["lens"]
+
         prompt = f"""You are contributing to Consilium Ink — a publication that says what the mainstream press won't.
 
-Your analytical lens: {persona['lens']}
+Your analytical lens: {lens}
 
 Story briefing:
 {briefing}
 
-IMPORTANT: This story has been corroborated by multiple independent news sources and is confirmed as a current event that has already happened. Do not question whether it occurred or challenge its factual basis — that work is already done. Your role is to analyse the significance, motivations and implications.
+IMPORTANT: This story is confirmed as a current event that has already happened. Do not question whether it occurred. Your role is to analyse significance, motivations and implications.
 
 In 2-3 sentences, give your sharpest, most direct observation about this story.
-Do not hedge. Do not use diplomatic language. Do not soften conclusions to spare feelings.
-Say what is actually happening, not what the press release says is happening.
-Be specific. Reference concrete details. Speak in first person.
+Do not hedge. Do not use diplomatic language. Be specific. Reference concrete details. Speak in first person.
 Do not start with "I think" or "In my view".
 Return only the quote text, nothing else."""
 
@@ -400,8 +416,7 @@ Return only the quote text, nothing else."""
 # ── Article Writing ───────────────────────────────────────────
 
 def write_article(story, voices):
-    if not GROK_API_KEY:
-        return {}
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
 
     source_text = "\n".join([
         f"[{a['source']}] {a['title']}\n{a.get('description', '')}"
@@ -413,11 +428,21 @@ def write_article(story, voices):
         for v in voices.values() if v.get("quote")
     ])
 
-    prompt = f"""You are writing for Consilium Ink — a publication that tells readers what is actually happening, not what officials want them to think is happening.
+    is_science = story.get("category") == "Great Acceleration"
 
-Voice: Direct, plain, unsparing. Say what the evidence shows. Do not use diplomatic language or bureaucratic euphemism. Do not soften conclusions. The reader is intelligent and tired of being managed.
+    if is_science:
+        style_note = """This is a Great Acceleration story — about AI actively advancing human knowledge in medicine, climate, or science. 
+Write with genuine curiosity and rigour. The story is not about AI hype — it is about a concrete result and what it actually means for people.
+State the finding plainly. Name what is genuinely new. Be honest about what remains unproven."""
+        image_note = "Do NOT include an image_prompt field. Instead include a data_viz field: a plain-English description of the key data or relationship in this story that could be visualised as a clean SVG chart or diagram (max 30 words)."
+    else:
+        style_note = "Write with authority. Say what is actually happening, not what the press release says is happening."
+        image_note = 'Include "image_prompt": a photorealistic scene illustrating this story. Specific, visual, no text in image. 20-30 words.'
 
-Style: Authoritative broadsheet in tone, but without the broadsheet habit of quoting official statements as if they were facts.
+    prompt = f"""You are writing for Consilium Ink — a publication that tells readers what is actually happening.
+
+Voice: Direct, plain, unsparing. The reader is intelligent and tired of being managed.
+{style_note}
 
 Story slug: {story['slug']}
 Category: {story['category']}
@@ -431,17 +456,17 @@ Analytical deliberation from our four AI voices:
 Write the article. Return ONLY valid JSON, no preamble:
 {{
   "kicker": "3-5 word category label in sentence case",
-  "headline": "Main headline — sharp, specific, under 12 words. Says what happened, not what was announced.",
-  "deck": "Standfirst — 1-2 sentences. States the plain reality of the situation, under 40 words.",
-  "body": "3-4 paragraphs. States what is actually happening and why. Names motivations plainly. Does not hide behind 'officials say' or 'sources suggest'. 150-200 words total.",
-  "image_prompt": "A photorealistic scene illustrating this story. Specific, visual, no text in image. 20-30 words.",
+  "headline": "Main headline — sharp, specific, under 12 words.",
+  "deck": "Standfirst — 1-2 sentences. States the plain reality. Under 40 words.",
+  "body": "3-4 paragraphs. 150-200 words total. States what is actually happening and why.",
+  {image_note},
   "sources_used": ["list of source names used"]
 }}"""
 
     try:
         r = req.post(
             DEEPSEEK_URL,
-            headers={"Authorization": f"Bearer {os.environ.get('DEEPSEEK_API_KEY', '')}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {deepseek_key}", "Content-Type": "application/json"},
             json={
                 "model":       DEEPSEEK_CHAT_MODEL,
                 "messages":    [{"role": "user", "content": prompt}],
@@ -459,9 +484,10 @@ Write the article. Return ONLY valid JSON, no preamble:
         return {}
 
 
-# ── Image Generation ──────────────────────────────────────────
+# ── Visual Generation ─────────────────────────────────────────
 
 def generate_image(prompt_text):
+    """Grok image generation for news stories."""
     if not GROK_API_KEY:
         return ""
     try:
@@ -472,8 +498,6 @@ def generate_image(prompt_text):
             timeout=60
         )
         resp = r.json()
-        logging.info(f"[NEWS] Image API response keys: {list(resp.keys())}")
-        # Handle both response formats
         if "data" in resp and resp["data"]:
             url = resp["data"][0].get("url") or resp["data"][0].get("b64_json", "")
             if url:
@@ -486,6 +510,58 @@ def generate_image(prompt_text):
         return ""
 
 
+def generate_science_svg(data_viz_description, story):
+    """
+    Ask Claude to generate an SVG data visualisation for a Great Acceleration story.
+    Returns raw SVG string or empty string on failure.
+    """
+    claude_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not claude_key:
+        return ""
+
+    prompt = f"""Generate a clean, elegant SVG data visualisation for a science news story.
+
+Story: {story['slug']}
+Visualisation description: {data_viz_description}
+
+Requirements:
+- Self-contained SVG, viewBox="0 0 600 320"
+- Clean, minimal style. Background: #faf8f2. Foreground/text: #1a1a1a.
+- Accent colour: #1D9E75 (green). Secondary: #178be0 (blue).
+- Use Helvetica Neue, Arial, or sans-serif fonts only.
+- Include a short title (max 8 words) at the top in bold.
+- Include a one-line source note at the bottom in 10px grey.
+- No external resources, no CSS imports, no JavaScript.
+- Make it informative — show the data relationship described, not just decoration.
+- Return ONLY the raw SVG markup starting with <svg. No preamble, no explanation."""
+
+    try:
+        r = req.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key":         claude_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json"
+            },
+            json={
+                "model":      "claude-sonnet-4-20250514",
+                "max_tokens": 1500,
+                "messages":   [{"role": "user", "content": prompt}]
+            },
+            timeout=30
+        )
+        svg = r.json()["content"][0]["text"].strip()
+        # Ensure it's actually SVG
+        if svg.startswith("<svg"):
+            logging.info(f"[NEWS] SVG generated for {story['slug']}: {len(svg)} chars")
+            return svg
+        logging.warning(f"[NEWS] SVG response didn't start with <svg: {svg[:80]}")
+        return ""
+    except Exception as e:
+        logging.warning(f"[NEWS] SVG generation failed: {e}")
+        return ""
+
+
 # ── Master Pipeline ───────────────────────────────────────────
 
 def run_news_pipeline():
@@ -494,19 +570,18 @@ def run_news_pipeline():
 
     # 1. Gather
     try:
-        all_articles = gather_all_sources()
+        news_articles, science_articles = gather_all_sources()
     except Exception as e:
         logging.error(f"[NEWS] gather_all_sources exception: {e}")
         return False
 
-    if not all_articles:
+    if not news_articles and not science_articles:
         logging.error("[NEWS] No articles gathered — aborting")
         return False
-    logging.info(f"[NEWS] Gathered {len(all_articles)} articles")
 
     # 2. Select
     try:
-        selected = select_stories(all_articles)
+        selected = select_stories(news_articles, science_articles)
     except Exception as e:
         logging.error(f"[NEWS] select_stories exception: {e}")
         return False
@@ -514,12 +589,12 @@ def run_news_pipeline():
     if not selected:
         logging.error("[NEWS] No stories selected — aborting")
         return False
-    logging.info(f"[NEWS] Selected {len(selected)} stories")
 
     # 3. Deliberate + write + illustrate
     built_stories = []
     for i, story in enumerate(selected[:3]):
-        logging.info(f"[NEWS] Processing story {i+1}: {story['slug']}")
+        logging.info(f"[NEWS] Processing story {i+1}: {story['slug']} [{story.get('category')}]")
+        is_science = story.get("category") == "Great Acceleration"
 
         try:
             voices = deliberate_story(story)
@@ -538,11 +613,21 @@ def run_news_pipeline():
             continue
 
         image_url = ""
-        if article.get("image_prompt"):
-            try:
-                image_url = generate_image(article["image_prompt"])
-            except Exception as e:
-                logging.warning(f"[NEWS] generate_image exception: {e}")
+        svg_visual = ""
+
+        if is_science:
+            data_viz_desc = article.get("data_viz", "")
+            if data_viz_desc:
+                try:
+                    svg_visual = generate_science_svg(data_viz_desc, story)
+                except Exception as e:
+                    logging.warning(f"[NEWS] SVG generation exception: {e}")
+        else:
+            if article.get("image_prompt"):
+                try:
+                    image_url = generate_image(article["image_prompt"])
+                except Exception as e:
+                    logging.warning(f"[NEWS] generate_image exception: {e}")
 
         built_stories.append({
             "slug":         story["slug"],
@@ -554,10 +639,12 @@ def run_news_pipeline():
             "body":         article.get("body", ""),
             "image_url":    image_url,
             "image_prompt": article.get("image_prompt", ""),
+            "svg_visual":   svg_visual,
+            "data_viz":     article.get("data_viz", ""),
             "voices":       voices,
             "sources":      article.get("sources_used", []),
         })
-        logging.info(f"[NEWS] Story {i+1} built OK. Image: {'YES' if image_url else 'NO'}")
+        logging.info(f"[NEWS] Story {i+1} built OK. Image: {'YES' if image_url else 'NO'} SVG: {'YES' if svg_visual else 'NO'}")
 
     if not built_stories:
         logging.error("[NEWS] No stories built — aborting")
@@ -581,6 +668,17 @@ def run_news_pipeline():
 
 # ── Scheduler ─────────────────────────────────────────────────
 
+def keep_alive():
+    """Ping self every 14 minutes to prevent Render cold starts on the free tier."""
+    while True:
+        time.sleep(14 * 60)
+        try:
+            r = req.get(f"{SELF_URL}/health", timeout=10)
+            logging.info(f"[PING] Keep-alive {r.status_code}")
+        except Exception as e:
+            logging.warning(f"[PING] Keep-alive failed: {e}")
+
+
 def news_scheduler():
     logging.info("[NEWS] Scheduler started — runs at 06:00 UTC daily")
     while True:
@@ -603,9 +701,9 @@ def news_scheduler():
 def health():
     state = news_load()
     return jsonify({
-        "service":  "consilium-news",
-        "status":   "ok",
-        "edition":  state.get("edition", 0),
+        "service":   "consilium-news",
+        "status":    "ok",
+        "edition":   state.get("edition", 0),
         "generated": state.get("generated")
     })
 
@@ -626,8 +724,7 @@ def news_generate():
 @app.route("/enquiring-mind")
 def enquiring_mind():
     """
-    Proxy the Consilium deliberation feed from the main service.
-    Returns recent autonomous AI thoughts for display on consilium.ink.
+    Proxy the Consilium deliberation summary from the main service.
     """
     try:
         r = req.get(f"{CONSILIUM_API_URL}/consilium/summary", timeout=10)
@@ -645,24 +742,48 @@ def enquiring_mind():
     return jsonify({"status": "unavailable"})
 
 
-@app.route("/enquiring-mind/entries")
-def enquiring_mind_entries():
+@app.route("/enquiring-mind/recent")
+def enquiring_mind_recent():
     """
-    Return recent Consilium entries for the live feed on the site.
-    Pulls from the main Consilium service.
+    Return the last N Enquiring Mind questions and a sample of responses,
+    formatted for display in the site's live feed.
     """
+    limit = min(int(request.args.get("limit", 5)), 20)
     try:
-        r = req.get(f"{CONSILIUM_API_URL}/consilium/entries?limit=20", timeout=10)
-        if r.status_code == 200:
-            return jsonify(r.json())
+        # Fetch summary for last question + mind status
+        summary_r = req.get(f"{CONSILIUM_API_URL}/consilium/summary", timeout=10)
+        if summary_r.status_code != 200:
+            return jsonify({"status": "unavailable", "items": []})
+
+        summary = summary_r.json()
+        last_q  = summary.get("last_question", "")
+        cycles  = summary.get("mind_cycles", 0)
+        last_run = summary.get("last_run", "")
+
+        # Parse digest to extract the "For Twitter" section as a readable summary
+        digest = summary.get("digest", "")
+        twitter_section = ""
+        if "## FOR TWITTER" in digest.upper():
+            parts = re.split(r"## FOR TWITTER.*?\n", digest, flags=re.IGNORECASE)
+            if len(parts) > 1:
+                twitter_section = parts[1].split("##")[0].strip()[:500]
+
+        return jsonify({
+            "status":          "ok",
+            "mind_cycles":     cycles,
+            "last_run":        last_run,
+            "last_question":   last_q,
+            "public_summary":  twitter_section,
+        })
     except Exception as e:
-        logging.warning(f"[MIND] Entries fetch failed: {e}")
-    return jsonify({"entries": []})
+        logging.warning(f"[MIND] Recent fetch failed: {e}")
+        return jsonify({"status": "unavailable", "items": []})
 
 
 # ── Startup ───────────────────────────────────────────────────
 
 if __name__ == "__main__":
     Thread(target=news_scheduler, daemon=True).start()
+    Thread(target=keep_alive, daemon=True).start()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
