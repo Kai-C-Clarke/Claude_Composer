@@ -685,6 +685,8 @@ def run_news_pipeline():
         return False
 
     # 3. Deliberate + write + illustrate
+    existing      = news_load()
+    next_edition  = existing.get("edition", 0) + 1
     built_stories = []
     for i, story in enumerate(selected[:3]):
         logging.info(f"[NEWS] Processing story {i+1}: {story['slug']} [{story.get('category')}]")
@@ -722,7 +724,7 @@ def run_news_pipeline():
             # News / AI & Society: Grok header image for modal
             if article.get("image_prompt"):
                 try:
-                    img_filename = f"edition-{existing.get('edition', 0) + 1}-story-{i+1}.jpg"
+                    img_filename = f"edition-{next_edition}-story-{i+1}.jpg"
                     image_url = generate_image(article["image_prompt"], img_filename)
                 except Exception as e:
                     logging.warning(f"[NEWS] generate_image exception: {e}")
@@ -749,8 +751,7 @@ def run_news_pipeline():
         return False
 
     # 4. Save
-    existing = news_load()
-    edition  = existing.get("edition", 0) + 1
+    edition = next_edition
     state = {
         "generated": start.isoformat() + "Z",
         "edition":   edition,
@@ -817,44 +818,6 @@ def serve_image(filename):
 
 
 
-
-@app.route("/debug/image-test")
-def debug_image_test():
-    """Test Grok image generation - tries multiple model names, returns all results."""
-    grok_key = os.environ.get("GROK_API_KEY", "")
-    if not grok_key:
-        return jsonify({"error": "no GROK_API_KEY set"}), 500
-
-    # Also list available models
-    models_result = {}
-    try:
-        mr = req.get(
-            "https://api.x.ai/v1/models",
-            headers={"Authorization": f"Bearer {grok_key}"},
-            timeout=10
-        )
-        models_result = mr.json()
-    except Exception as e:
-        models_result = {"error": str(e)}
-
-    # Try each candidate model name
-    candidates = ["grok-imagine-image", "grok-2-image", "aurora", "grok-image", "grok-2-image-1212"]
-    results = {}
-    for model in candidates:
-        try:
-            r = req.post(
-                "https://api.x.ai/v1/images/generations",
-                headers={"Authorization": f"Bearer {grok_key}", "Content-Type": "application/json"},
-                json={"model": model, "prompt": "red circle white background", "n": 1, "response_format": "url"},
-                timeout=20
-            )
-            results[model] = {"status": r.status_code, "response": r.json()}
-            if r.status_code == 200 and "data" in r.json():
-                break  # Found a working one, stop
-        except Exception as e:
-            results[model] = {"error": str(e)}
-
-    return jsonify({"models_available": models_result, "image_tests": results})
 
 @app.route("/news/state")
 def news_state():
