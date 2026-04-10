@@ -259,75 +259,109 @@ def gather_all_sources():
 # ── Story Selection ───────────────────────────────────────────
 
 def select_stories(news_articles, science_articles):
-    """Select 2 news stories + 1 Great Acceleration story."""
-    all_articles = news_articles + science_articles
+    """Select 2 news stories + 1 Great Acceleration story, in separate passes."""
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
 
-    article_lines = [
-        f"{i}: [{'SCIENCE' if a.get('pool')=='science' else 'NEWS'}][{a['source']}] {a['title']} — {a['description'][:100]}"
-        for i, a in enumerate(all_articles[:70])
+    # ── Pass 1: 2 news stories ────────────────────────────────
+    news_lines = [
+        f"{i}: [{a['source']}] {a['title']} — {a['description'][:100]}"
+        for i, a in enumerate(news_articles[:60])
     ]
 
-    prompt = f"""You are the editorial director of Consilium Ink — a publication that says what the mainstream press won't.
+    news_prompt = f"""You are the editorial director of Consilium Ink — a publication that says what the mainstream press won't.
+From the articles below, identify the 2 most significant news stories of the day.
 
-From the articles below, identify exactly 3 stories:
-- 2 from the NEWS pool (global affairs, geopolitics, economics, society)
-- 1 from the SCIENCE pool — this must be a "Great Acceleration" story about how AI is actively advancing medicine, climate science, or fundamental research in a concrete way. Not hype — actual results.
-
-RULES FOR ALL STORIES:
-1. Only select stories CORROBORATED by at least 2 independent sources in the list.
-2. Only select events that have ALREADY HAPPENED — no previews, predictions or scheduled events.
-3. The more sources covering the same event, the more confident you can be.
-
-For the Great Acceleration story, prioritise: AI in drug discovery / diagnostics / climate modelling / genomics / materials science. Skip AI announcements and press releases — find concrete results.
+RULES:
+1. Only select stories CORROBORATED by at least 2 independent sources.
+2. Only select events that have ALREADY HAPPENED — no previews or predictions.
+3. Prioritise stories with coverage from multiple regional perspectives.
 
 For each story return:
 1. A concise editorial slug (3-5 words)
 2. Which article indices cover it (at least 2)
-3. Category: one of {CATEGORIES}
-4. One sentence on why this matters and what coverage misses
+3. Regions/perspectives represented
+4. Category: one of Geopolitics / Economics / Technology / Climate / Society
+5. One sentence on why this story matters
 
-Return ONLY valid JSON, no preamble:
+Return ONLY valid JSON:
 {{
   "stories": [
     {{
       "slug": "...",
       "category": "...",
-      "article_indices": [0, 3, 7],
-      "regions": ["Western", "Middle East"],
+      "article_indices": [0, 3],
+      "regions": ["Western"],
       "why": "..."
     }}
   ]
 }}
 
 Articles:
-{chr(10).join(article_lines)}
+{chr(10).join(news_lines)}
 """
 
-    deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    try:
-        r = req.post(
-            DEEPSEEK_URL,
-            headers={"Authorization": f"Bearer {deepseek_key}", "Content-Type": "application/json"},
-            json={
-                "model":       DEEPSEEK_CHAT_MODEL,
-                "messages":    [{"role": "user", "content": prompt}],
-                "max_tokens":  1000,
-                "temperature": 0.3
-            },
-            timeout=60
-        )
-        raw = r.json()["choices"][0]["message"]["content"].strip()
-        raw = re.sub(r"^```json\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-        stories = json.loads(raw).get("stories", [])[:3]
-        for story in stories:
-            indices = story.get("article_indices", [])
-            story["source_articles"] = [all_articles[i] for i in indices if i < len(all_articles)]
-        logging.info(f"[NEWS] Selected {len(stories)} stories")
-        return stories
-    except Exception as e:
-        logging.error(f"[NEWS] Story selection failed: {e}")
-        return []
+    # ── Pass 2: 1 Great Acceleration story ────────────────────
+    sci_lines = [
+        f"{i}: [{a['source']}] {a['title']} — {a['description'][:120]}"
+        for i, a in enumerate(science_articles[:40])
+    ]
+
+    sci_prompt = f"""You are the science editor of Consilium Ink.
+From the articles below, identify the 1 most significant story showing how AI is concretely advancing human knowledge in medicine, climate science, or fundamental research.
+
+RULES:
+1. Must be CORROBORATED by at least 2 sources, OR be from a high-credibility source (Nature, arXiv, Wellcome, MIT Tech Review).
+2. Must be a concrete result already achieved — not a prediction, announcement, or planned study.
+3. Skip pure AI company announcements — find actual scientific applications.
+4. If nothing qualifies, pick the best available science/technology story.
+
+Return ONLY valid JSON:
+{{
+  "stories": [
+    {{
+      "slug": "...",
+      "category": "Great Acceleration",
+      "article_indices": [0, 2],
+      "regions": ["Global"],
+      "why": "..."
+    }}
+  ]
+}}
+
+Articles:
+{chr(10).join(sci_lines)}
+"""
+
+    all_selected = []
+
+    for label, prompt, pool in [("news", news_prompt, news_articles), ("science", sci_prompt, science_articles)]:
+        try:
+            r = req.post(
+                DEEPSEEK_URL,
+                headers={"Authorization": f"Bearer {deepseek_key}", "Content-Type": "application/json"},
+                json={
+                    "model":       DEEPSEEK_CHAT_MODEL,
+                    "messages":    [{"role": "user", "content": prompt}],
+                    "max_tokens":  800,
+                    "temperature": 0.3
+                },
+                timeout=60
+            )
+            raw = r.json()["choices"][0]["message"]["content"].strip()
+            raw = re.sub(r"^```json\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            stories = json.loads(raw).get("stories", [])
+            limit = 2 if label == "news" else 1
+            for story in stories[:limit]:
+                indices = story.get("article_indices", [])
+                story["source_articles"] = [pool[i] for i in indices if i < len(pool)]
+                all_selected.append(story)
+            logging.info(f"[NEWS] Selected {len(stories[:limit])} {label} stories")
+        except Exception as e:
+            logging.error(f"[NEWS] Story selection failed ({label}): {e}")
+
+    logging.info(f"[NEWS] Total selected: {len(all_selected)} stories")
+    return all_selected
 
 
 # ── Deliberation ──────────────────────────────────────────────
@@ -745,35 +779,50 @@ def enquiring_mind():
 @app.route("/enquiring-mind/recent")
 def enquiring_mind_recent():
     """
-    Return the last N Enquiring Mind questions and a sample of responses,
-    formatted for display in the site's live feed.
+    Return the last Enquiring Mind question and summary for display on the site.
+    Pulls summary from /consilium/summary and question from /consilium/mind.
     """
     limit = min(int(request.args.get("limit", 5)), 20)
     try:
-        # Fetch summary for last question + mind status
         summary_r = req.get(f"{CONSILIUM_API_URL}/consilium/summary", timeout=10)
+        mind_r    = req.get(f"{CONSILIUM_API_URL}/consilium/mind", timeout=10)
+
         if summary_r.status_code != 200:
             return jsonify({"status": "unavailable", "items": []})
 
         summary = summary_r.json()
-        last_q  = summary.get("last_question", "")
-        cycles  = summary.get("mind_cycles", 0)
+        cycles   = summary.get("mind_cycles", 0)
         last_run = summary.get("last_run", "")
 
-        # Parse digest to extract the "For Twitter" section as a readable summary
+        # Get last question from /consilium/mind
+        last_q = ""
+        if mind_r.status_code == 200:
+            mind_data = mind_r.json()
+            last_q = mind_data.get("last_question", "")
+
+        # Parse digest for the Twitter/public summary section
         digest = summary.get("digest", "")
-        twitter_section = ""
-        if "## FOR TWITTER" in digest.upper():
-            parts = re.split(r"## FOR TWITTER.*?\n", digest, flags=re.IGNORECASE)
-            if len(parts) > 1:
-                twitter_section = parts[1].split("##")[0].strip()[:500]
+        public_summary = ""
+        for marker in ["## FOR TWITTER", "## FOR X", "## FOR TWITTER/X AUDIENCE"]:
+            if marker.upper() in digest.upper():
+                idx = digest.upper().find(marker.upper())
+                section = digest[idx:]
+                # Strip the header line, take up to next ## or end
+                lines = section.split("\n")
+                body_lines = []
+                for line in lines[1:]:
+                    if line.startswith("##"):
+                        break
+                    body_lines.append(line)
+                public_summary = "\n".join(body_lines).strip()[:500]
+                break
 
         return jsonify({
             "status":          "ok",
             "mind_cycles":     cycles,
             "last_run":        last_run,
             "last_question":   last_q,
-            "public_summary":  twitter_section,
+            "public_summary":  public_summary,
         })
     except Exception as e:
         logging.warning(f"[MIND] Recent fetch failed: {e}")
