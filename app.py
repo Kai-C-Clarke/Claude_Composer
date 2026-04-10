@@ -804,7 +804,7 @@ def enquiring_mind_recent():
             # Parse digest for public-facing summary
             digest = summary.get("digest", "")
             public_summary = ""
-            for marker in ["## FOR TWITTER/X AUDIENCE", "## FOR TWITTER", "## FOR X"]:
+            for marker in ["## FOR X/TWITTER", "## FOR TWITTER/X", "## FOR TWITTER", "## FOR X AUDIENCE"]:
                 if marker.upper() in digest.upper():
                     idx = digest.upper().find(marker.upper())
                     section = digest[idx:]
