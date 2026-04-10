@@ -782,51 +782,54 @@ def enquiring_mind_recent():
     Return the last Enquiring Mind question and summary for display on the site.
     Pulls summary from /consilium/summary and question from /consilium/mind.
     """
-    limit = min(int(request.args.get("limit", 5)), 20)
-    try:
-        summary_r = req.get(f"{CONSILIUM_API_URL}/consilium/summary", timeout=10)
-        mind_r    = req.get(f"{CONSILIUM_API_URL}/consilium/mind", timeout=10)
+    for attempt in range(2):
+        try:
+            summary_r = req.get(f"{CONSILIUM_API_URL}/consilium/summary", timeout=25)
+            mind_r    = req.get(f"{CONSILIUM_API_URL}/consilium/mind",    timeout=25)
 
-        if summary_r.status_code != 200:
-            return jsonify({"status": "unavailable", "items": []})
+            if summary_r.status_code != 200:
+                if attempt == 0:
+                    time.sleep(3)
+                    continue
+                return jsonify({"status": "unavailable", "items": []})
 
-        summary = summary_r.json()
-        cycles   = summary.get("mind_cycles", 0)
-        last_run = summary.get("last_run", "")
+            summary  = summary_r.json()
+            cycles   = summary.get("mind_cycles", 0)
+            last_run = summary.get("last_run", "")
 
-        # Get last question from /consilium/mind
-        last_q = ""
-        if mind_r.status_code == 200:
-            mind_data = mind_r.json()
-            last_q = mind_data.get("last_question", "")
+            last_q = ""
+            if mind_r.status_code == 200:
+                last_q = mind_r.json().get("last_question", "")
 
-        # Parse digest for the Twitter/public summary section
-        digest = summary.get("digest", "")
-        public_summary = ""
-        for marker in ["## FOR TWITTER", "## FOR X", "## FOR TWITTER/X AUDIENCE"]:
-            if marker.upper() in digest.upper():
-                idx = digest.upper().find(marker.upper())
-                section = digest[idx:]
-                # Strip the header line, take up to next ## or end
-                lines = section.split("\n")
-                body_lines = []
-                for line in lines[1:]:
-                    if line.startswith("##"):
-                        break
-                    body_lines.append(line)
-                public_summary = "\n".join(body_lines).strip()[:500]
-                break
+            # Parse digest for public-facing summary
+            digest = summary.get("digest", "")
+            public_summary = ""
+            for marker in ["## FOR TWITTER/X AUDIENCE", "## FOR TWITTER", "## FOR X"]:
+                if marker.upper() in digest.upper():
+                    idx = digest.upper().find(marker.upper())
+                    section = digest[idx:]
+                    lines = section.split("\n")
+                    body_lines = []
+                    for line in lines[1:]:
+                        if line.startswith("##"):
+                            break
+                        body_lines.append(line)
+                    public_summary = "\n".join(body_lines).strip()[:500]
+                    break
 
-        return jsonify({
-            "status":          "ok",
-            "mind_cycles":     cycles,
-            "last_run":        last_run,
-            "last_question":   last_q,
-            "public_summary":  public_summary,
-        })
-    except Exception as e:
-        logging.warning(f"[MIND] Recent fetch failed: {e}")
-        return jsonify({"status": "unavailable", "items": []})
+            return jsonify({
+                "status":         "ok",
+                "mind_cycles":    cycles,
+                "last_run":       last_run,
+                "last_question":  last_q,
+                "public_summary": public_summary,
+            })
+        except Exception as e:
+            logging.warning(f"[MIND] Recent fetch attempt {attempt+1} failed: {e}")
+            if attempt == 0:
+                time.sleep(5)
+
+    return jsonify({"status": "unavailable", "items": []})
 
 
 # ── Startup ───────────────────────────────────────────────────
