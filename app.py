@@ -820,25 +820,41 @@ def serve_image(filename):
 
 @app.route("/debug/image-test")
 def debug_image_test():
-    """Test Grok image generation - returns raw API response for debugging."""
+    """Test Grok image generation - tries multiple model names, returns all results."""
     grok_key = os.environ.get("GROK_API_KEY", "")
     if not grok_key:
         return jsonify({"error": "no GROK_API_KEY set"}), 500
+
+    # Also list available models
+    models_result = {}
     try:
-        r = req.post(
-            "https://api.x.ai/v1/images/generations",
-            headers={"Authorization": f"Bearer {grok_key}", "Content-Type": "application/json"},
-            json={
-                "model":           "grok-imagine-image",
-                "prompt":          "A simple test: red circle on white background",
-                "n":               1,
-                "response_format": "url"
-            },
-            timeout=30
+        mr = req.get(
+            "https://api.x.ai/v1/models",
+            headers={"Authorization": f"Bearer {grok_key}"},
+            timeout=10
         )
-        return jsonify({"status": r.status_code, "response": r.json()})
+        models_result = mr.json()
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        models_result = {"error": str(e)}
+
+    # Try each candidate model name
+    candidates = ["grok-imagine-image", "grok-2-image", "aurora", "grok-image", "grok-2-image-1212"]
+    results = {}
+    for model in candidates:
+        try:
+            r = req.post(
+                "https://api.x.ai/v1/images/generations",
+                headers={"Authorization": f"Bearer {grok_key}", "Content-Type": "application/json"},
+                json={"model": model, "prompt": "red circle white background", "n": 1, "response_format": "url"},
+                timeout=20
+            )
+            results[model] = {"status": r.status_code, "response": r.json()}
+            if r.status_code == 200 and "data" in r.json():
+                break  # Found a working one, stop
+        except Exception as e:
+            results[model] = {"error": str(e)}
+
+    return jsonify({"models_available": models_result, "image_tests": results})
 
 @app.route("/news/state")
 def news_state():
