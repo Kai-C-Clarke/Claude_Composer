@@ -816,6 +816,30 @@ def serve_image(filename):
     return send_from_directory(IMAGE_CACHE_DIR, filename)
 
 
+
+
+@app.route("/debug/image-test")
+def debug_image_test():
+    """Test Grok image generation - returns raw API response for debugging."""
+    grok_key = os.environ.get("GROK_API_KEY", "")
+    if not grok_key:
+        return jsonify({"error": "no GROK_API_KEY set"}), 500
+    try:
+        r = req.post(
+            "https://api.x.ai/v1/images/generations",
+            headers={"Authorization": f"Bearer {grok_key}", "Content-Type": "application/json"},
+            json={
+                "model":           "grok-imagine-image",
+                "prompt":          "A simple test: red circle on white background",
+                "n":               1,
+                "response_format": "url"
+            },
+            timeout=30
+        )
+        return jsonify({"status": r.status_code, "response": r.json()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/news/state")
 def news_state():
     return jsonify(news_load())
