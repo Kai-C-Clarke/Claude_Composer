@@ -542,13 +542,23 @@ Write the article. Return ONLY valid JSON, no preamble:
 
 # ── Visual Generation ─────────────────────────────────────────
 
-def generate_image(prompt_text):
-    """Generate a header image via Grok Imagine for news/AI&Society stories."""
+IMAGE_CACHE_DIR = "/mnt/data/images"
+IMAGE_SERVE_URL = os.environ.get("SELF_URL", "https://claude-composer.onrender.com") + "/images"
+
+os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
+
+
+def generate_image(prompt_text, filename):
+    """
+    Generate a header image via Grok Imagine, download it, and cache to Render disk.
+    Returns a permanent self-hosted URL, not the temporary imgen.x.ai URL.
+    """
     grok_key = os.environ.get("GROK_API_KEY", "")
     if not grok_key:
         logging.warning("[NEWS] generate_image: no GROK_API_KEY")
         return ""
     try:
+        # Generate via Grok
         r = req.post(
             "https://api.x.ai/v1/images/generations",
             headers={"Authorization": f"Bearer {grok_key}", "Content-Type": "application/json"},
@@ -559,19 +569,36 @@ def generate_image(prompt_text):
                 "aspect_ratio":    "3:2",
                 "response_format": "url"
             },
-            timeout=45
+            timeout=60
         )
         resp = r.json()
         if "error" in resp:
             logging.warning(f"[NEWS] Grok image error: {resp['error']}")
             return ""
-        if "data" in resp and resp["data"]:
-            url = resp["data"][0].get("url", "")
-            if url:
-                logging.info(f"[NEWS] Grok image OK: {url[:60]}...")
-                return url
-        logging.warning(f"[NEWS] Grok image unexpected response: {str(resp)[:200]}")
-        return ""
+        if not ("data" in resp and resp["data"]):
+            logging.warning(f"[NEWS] Grok image unexpected response: {str(resp)[:200]}")
+            return ""
+
+        temp_url = resp["data"][0].get("url", "")
+        if not temp_url:
+            return ""
+
+        logging.info(f"[NEWS] Grok image generated: {temp_url[:60]}...")
+
+        # Download and cache to disk
+        img_r = req.get(temp_url, timeout=30)
+        if img_r.status_code != 200:
+            logging.warning(f"[NEWS] Image download failed: {img_r.status_code}")
+            return temp_url  # Fall back to temp URL rather than nothing
+
+        filepath = os.path.join(IMAGE_CACHE_DIR, filename)
+        with open(filepath, "wb") as f:
+            f.write(img_r.content)
+
+        cached_url = f"{IMAGE_SERVE_URL}/{filename}"
+        logging.info(f"[NEWS] Image cached: {filepath} → {cached_url}")
+        return cached_url
+
     except Exception as e:
         logging.warning(f"[NEWS] generate_image failed: {e}")
         return ""
@@ -695,7 +722,8 @@ def run_news_pipeline():
             # News / AI & Society: Grok header image for modal
             if article.get("image_prompt"):
                 try:
-                    image_url = generate_image(article["image_prompt"])
+                    img_filename = f"edition-{existing.get('edition', 0) + 1}-story-{i+1}.jpg"
+                    image_url = generate_image(article["image_prompt"], img_filename)
                 except Exception as e:
                     logging.warning(f"[NEWS] generate_image exception: {e}")
 
@@ -776,6 +804,16 @@ def health():
         "edition":   state.get("edition", 0),
         "generated": state.get("generated")
     })
+
+
+@app.route("/images/<path:filename>")
+def serve_image(filename):
+    """Serve cached images from Render disk."""
+    from flask import send_from_directory, abort
+    filepath = os.path.join(IMAGE_CACHE_DIR, filename)
+    if not os.path.exists(filepath):
+        abort(404)
+    return send_from_directory(IMAGE_CACHE_DIR, filename)
 
 
 @app.route("/news/state")
