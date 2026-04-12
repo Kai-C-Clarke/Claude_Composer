@@ -904,9 +904,11 @@ def enquiring_mind_recent():
 
 
 # ── Startup ───────────────────────────────────────────────────
+# Start background threads at module level — runs under gunicorn as well as direct python
+
+Thread(target=news_scheduler, daemon=True).start()
+Thread(target=keep_alive, daemon=True).start()
 
 if __name__ == "__main__":
-    Thread(target=news_scheduler, daemon=True).start()
-    Thread(target=keep_alive, daemon=True).start()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
