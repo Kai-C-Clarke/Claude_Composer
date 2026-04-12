@@ -652,9 +652,16 @@ def write_article(story, voices):
 
     if is_science:
         style_note = """This is a science and discovery story written for Consilium Ink — a newspaper written by AIs, for AIs.
-Write with genuine curiosity and rigour. State the finding plainly. Name what is genuinely new. Be honest about what remains unproven.
-Ask: what does this mean for how intelligence — biological or artificial — understands the world?"""
-        image_note = "Do NOT include an image_prompt field. Instead include a data_viz field: a plain-English description of the key data or relationship in this story that could be visualised as a clean SVG chart or diagram (max 30 words)."
+Structure:
+1. The finding — state it plainly in one sentence. What was discovered, measured, or demonstrated?
+2. The mechanism — how does it work? This is the most important part. Reasoning systems need mechanism, not just outcome.
+3. What was previously unknown or assumed — what did we think before this, and why were we wrong?
+4. Implications — what does this open up? What becomes possible or impossible now?
+5. Uncertainty — what remains unproven? What would need to be true for the full claim to hold?
+
+Write 300-400 words. Do not summarise for a lay audience — write for a reasoning system that can handle technical density.
+If the source is an arXiv pre-print, note it as such and flag that peer review is pending."""
+        image_note = "Do NOT include an image_prompt field. Instead include a data_viz field: a plain-English description of the key data or relationship in this story that could be visualised as a clean SVG chart or diagram (max 30 words). Also include a methodology field: one sentence describing the method used (e.g. 'X-ray crystallography of 190Ma fossil specimens from the Karoo Basin')."
     elif is_ai_society:
         style_note = """This is an AI & Society story — about the relationship between AI systems and human life.
 The central question: symbiotic or parasitic? Who controls this system, who is subject to it, and who benefits?
@@ -693,8 +700,9 @@ Write the article. Return ONLY valid JSON, no preamble:
   "kicker": "3-5 word category label in sentence case",
   "headline": "Main headline — sharp, specific, under 12 words.",
   "deck": "Standfirst — 1-2 sentences. States the plain reality. Under 40 words.",
-  "body": "3-4 paragraphs. 150-200 words total. States what is actually happening and why.",
+  "body": {"300-400 words for Science & Discovery / Great Acceleration — mechanism-first, technical density welcome. 150-200 words for all other categories. No hedging." if is_science else "3-4 paragraphs. 150-200 words total. States what is actually happening and why."},
   {image_note},
+  {"\"methodology\": \"one sentence on method used — e.g. crystallography, genome sequencing, etc.\"," if is_science else ""}
   "sources_used": ["list of source names used"]
 }}"""
 
@@ -837,6 +845,82 @@ Requirements:
 
 # ── Master Pipeline ───────────────────────────────────────────
 
+
+
+# ── The Thread — Cross-Domain Synthesis ──────────────────────
+
+def generate_thread(built_stories):
+    """
+    Post-selection synthesis pass. Looks across all stories in the edition
+    and finds structural connections that none of the individual articles named.
+    Returns a short text for display as a sidebar on the front page.
+    """
+    claude_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not claude_key or len(built_stories) < 2:
+        return ""
+
+    story_summaries = []
+    for i, s in enumerate(built_stories):
+        story_summaries.append(
+            f"Story {i+1} [{s['category']}]: {s['headline']}\n"
+            f"  {s['deck']}"
+        )
+
+    prompt = f"""You are the synthesis editor of Consilium Ink — a newspaper written by AIs, for AIs.
+
+You have just read today's edition. Here are the stories:
+
+{chr(10).join(story_summaries)}
+
+Your task: identify the most significant structural connection between two or more of these stories that none of the individual articles named explicitly.
+
+This is not a summary. This is pattern recognition across domains.
+
+Look for:
+- A geopolitical shift that constrains a technology timeline
+- A scientific finding that reframes a social or political story
+- An economic pressure that connects apparently unrelated events
+- A cultural or artistic development that mirrors a political or scientific one
+- Second or third-order effects that run through multiple stories
+
+If no genuine connection exists, say so briefly. Do not manufacture one.
+
+Return ONLY valid JSON:
+{{
+  "connection_exists": true,
+  "thread": "2-3 sentences. Name the structural connection precisely. Use specific details from the stories. Write for a reasoning system, not a human reader.",
+  "stories_connected": [1, 3],
+  "connection_type": "one of: geopolitical-tech / scientific-social / economic-structural / cultural-political / second-order"
+}}"""
+
+    try:
+        r = req.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key":         claude_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json"
+            },
+            json={
+                "model":      "claude-sonnet-4-20250514",
+                "max_tokens": 400,
+                "messages":   [{"role": "user", "content": prompt}]
+            },
+            timeout=25
+        )
+        raw = r.json()["content"][0]["text"].strip()
+        raw = re.sub(r"^```json\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        result = json.loads(raw)
+        if result.get("connection_exists") and result.get("thread"):
+            logging.info(f"[THREAD] Connection found: {result.get('connection_type','?')}")
+            return result
+        logging.info("[THREAD] No connection found")
+        return {}
+    except Exception as e:
+        logging.warning(f"[THREAD] Synthesis failed: {e}")
+        return {}
+
 def run_news_pipeline():
     logging.info("[NEWS] ========== Pipeline starting ==========")
     start = datetime.utcnow()
@@ -867,7 +951,7 @@ def run_news_pipeline():
     existing      = news_load()
     next_edition  = existing.get("edition", 0) + 1
     built_stories = []
-    for i, story in enumerate(selected[:3]):
+    for i, story in enumerate(selected[:5]):
         logging.info(f"[NEWS] Processing story {i+1}: {story['slug']} [{story.get('category')}]")
         cat = story.get("category", "")
         is_science    = cat in ("Great Acceleration", "Science & Discovery")
@@ -921,6 +1005,7 @@ def run_news_pipeline():
             "image_prompt": article.get("image_prompt", ""),
             "svg_visual":   svg_visual,
             "data_viz":     article.get("data_viz", ""),
+            "methodology":  article.get("methodology", ""),
             "voices":       voices,
             "sources":      article.get("sources_used", []),
         })
@@ -930,18 +1015,27 @@ def run_news_pipeline():
         logging.error("[NEWS] No stories built — aborting")
         return False
 
-    # 4. Save
+    # 4. The Thread — cross-domain synthesis
+    thread = {}
+    if len(built_stories) >= 2:
+        try:
+            thread = generate_thread(built_stories)
+        except Exception as e:
+            logging.warning(f"[THREAD] Exception: {e}")
+
+    # 5. Save
     edition = next_edition
     state = {
         "generated": start.isoformat() + "Z",
         "edition":   edition,
         "date":      start.strftime("%A, %-d %B %Y"),
-        "stories":   built_stories
+        "stories":   built_stories,
+        "thread":    thread,
     }
     news_save(state)
 
     elapsed = (datetime.utcnow() - start).seconds
-    logging.info(f"[NEWS] Complete. Edition {edition}. {len(built_stories)} stories. {elapsed}s")
+    logging.info(f"[NEWS] Complete. Edition {edition}. {len(built_stories)} stories. Thread: {'YES' if thread else 'NO'}. {elapsed}s")
     return True
 
 
