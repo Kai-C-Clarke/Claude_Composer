@@ -77,29 +77,68 @@ MODELS = {
 
 # ── RSS Sources ───────────────────────────────────────────────
 
+# ── World / Politics / Economics feeds ───────────────────────
 NEWS_RSS_FEEDS = {
     "Al Jazeera English": "https://www.aljazeera.com/xml/rss/all.xml",
     "BBC World":          "http://feeds.bbci.co.uk/news/world/rss.xml",
     "Arab News":          "https://www.arabnews.com/rss.xml",
     "France 24":          "https://www.france24.com/en/rss",
     "DW World":           "https://rss.dw.com/rdf/rss-en-world",
+    "The Conversation":   "https://theconversation.com/articles.atom",
 }
 
-# Great Acceleration sources — AI in medicine, science, climate
+# ── Science / Medicine / Technology feeds ─────────────────────
 SCIENCE_RSS_FEEDS = {
-    "Nature News":          "https://www.nature.com/nature.rss",
-    "arXiv AI":             "https://rss.arxiv.org/rss/cs.AI",
-    "arXiv Health":         "https://rss.arxiv.org/rss/q-bio.QM",
-    "Wellcome":             "https://wellcome.org/news/rss.xml",
-    "Carbon Brief":         "https://www.carbonbrief.org/feed",
-    "MIT Tech Review AI":   "https://www.technologyreview.com/topic/artificial-intelligence/feed",
+    "Nature News":           "https://www.nature.com/nature.rss",
+    "New Scientist":         "https://www.newscientist.com/feed/home/",
+    "arXiv AI":              "https://rss.arxiv.org/rss/cs.AI",
+    "arXiv Quantitative Bio":"https://rss.arxiv.org/rss/q-bio.QM",
+    "arXiv Physics":         "https://rss.arxiv.org/rss/physics.pop-ph",
+    "Wellcome":              "https://wellcome.org/news/rss.xml",
+    "Carbon Brief":          "https://www.carbonbrief.org/feed",
+    "MIT Tech Review":       "https://www.technologyreview.com/feed/",
+    "Ars Technica Science":  "https://feeds.arstechnica.com/arstechnica/science",
+    "Ars Technica Tech":     "https://feeds.arstechnica.com/arstechnica/technology-lab",
+    "IEEE Spectrum":         "https://spectrum.ieee.org/feeds/feed.rss",
+    "Space.com":             "https://www.space.com/feeds/all",
+    "Medical Xpress":        "https://medicalxpress.com/rss-feed/",
+    "Phys.org":              "https://phys.org/rss-feed/",
 }
 
-GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=war+OR+conflict+OR+economy+OR+climate&mode=artlist&maxrecords=10&format=json"
-GDELT_SCIENCE_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=AI+medicine+OR+climate+breakthrough+OR+scientific+discovery&mode=artlist&maxrecords=8&format=json"
+# ── Arts / Culture / Music feeds ──────────────────────────────
+ARTS_RSS_FEEDS = {
+    "The Art Newspaper":     "https://www.theartnewspaper.com/rss",
+    "Hyperallergic":         "https://hyperallergic.com/feed/",
+    "Pitchfork":             "https://pitchfork.com/rss/news/",
+    "The Wire Music":        "https://thewire.co.uk/rss",
+    "Creative Applications": "https://www.creativeapplications.net/feed/",
+    "Resident Advisor":      "https://ra.co/xml/news.xml",
+}
 
-# Categories
-CATEGORIES = ["Geopolitics", "Economics", "AI & Society", "Climate", "Great Acceleration"]
+GDELT_URL         = "https://api.gdeltproject.org/api/v2/doc/doc?query=war+OR+conflict+OR+economy+OR+climate&mode=artlist&maxrecords=10&format=json"
+GDELT_SCIENCE_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=AI+medicine+OR+climate+breakthrough+OR+scientific+discovery&mode=artlist&maxrecords=8&format=json"
+GDELT_TECH_URL    = "https://api.gdeltproject.org/api/v2/doc/doc?query=transport+innovation+OR+engineering+breakthrough+OR+space+mission&mode=artlist&maxrecords=8&format=json"
+
+# ── Section categories ─────────────────────────────────────────
+CATEGORIES = [
+    "Geopolitics",
+    "Economics",
+    "AI & Society",
+    "Climate",
+    "Science & Discovery",
+    "Technology",
+    "Arts & Culture",
+    "On Existence",
+    "Great Acceleration",
+]
+
+# Stories per section per edition
+SECTION_TARGETS = {
+    "world":    2,   # Geopolitics + Economics
+    "science":  1,   # Science & Discovery / Great Acceleration
+    "tech":     1,   # Technology
+    "arts":     1,   # Arts & Culture
+}
 
 # ── Deliberation Personas ─────────────────────────────────────
 
@@ -234,7 +273,7 @@ def fetch_gdelt(url=GDELT_URL, max_items=8):
 
 
 def gather_all_sources():
-    """Gather news + science sources. Returns (news_articles, science_articles)."""
+    """Gather all source pools: news, science, tech, arts."""
     news_articles = []
     news_articles.extend(fetch_newsapi(max_items=10))
     news_articles.extend(fetch_gdelt(GDELT_URL, max_items=8))
@@ -246,30 +285,51 @@ def gather_all_sources():
     for name, url in SCIENCE_RSS_FEEDS.items():
         science_articles.extend(fetch_rss(name, url, max_items=4))
 
-    # Tag science articles so selector knows their pool
-    for a in science_articles:
-        a["pool"] = "science"
-    for a in news_articles:
-        a["pool"] = "news"
+    tech_articles = []
+    tech_articles.extend(fetch_gdelt(GDELT_TECH_URL, max_items=6))
+    for name, url in ARTS_RSS_FEEDS.items():
+        # Arts feeds also go into tech_articles pool initially; selector separates them
+        pass
 
-    logging.info(f"[NEWS] Gathered {len(news_articles)} news + {len(science_articles)} science articles")
-    return news_articles, science_articles
+    arts_articles = []
+    for name, url in ARTS_RSS_FEEDS.items():
+        arts_articles.extend(fetch_rss(name, url, max_items=4))
+
+    # Tag pools
+    for a in news_articles:    a["pool"] = "news"
+    for a in science_articles: a["pool"] = "science"
+    for a in tech_articles:    a["pool"] = "tech"
+    for a in arts_articles:    a["pool"] = "arts"
+
+    logging.info(f"[NEWS] Gathered {len(news_articles)} news + {len(science_articles)} science + {len(tech_articles)} tech + {len(arts_articles)} arts")
+    return news_articles, science_articles, tech_articles, arts_articles
 
 
 # ── Story Selection ───────────────────────────────────────────
 
-def select_stories(news_articles, science_articles):
-    """Select 2 news stories + 1 Great Acceleration story, in separate passes."""
+def select_stories(news_articles, science_articles, tech_articles=None, arts_articles=None):
+    """
+    Select stories across all sections:
+    - 2 world stories (Geopolitics / Economics / AI & Society / Climate)
+    - 1 science story (Science & Discovery / Great Acceleration)
+    - 1 technology story (Technology)
+    - 1 arts story (Arts & Culture)
+    Returns up to 5 stories.
+    """
     deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if tech_articles is None: tech_articles = []
+    if arts_articles is None: arts_articles = []
 
-    # ── Pass 1: 2 news stories ────────────────────────────────
+    all_selected = []
+
+    # ── Pass 1: 2 world/society stories ─────────────────────────
     news_lines = [
         f"{i}: [{a['source']}] {a['title']} — {a['description'][:100]}"
         for i, a in enumerate(news_articles[:60])
     ]
 
-    news_prompt = f"""You are the editorial director of Consilium Ink — a publication that says what the mainstream press won't.
-From the articles below, identify the 2 most significant news stories of the day.
+    news_prompt = f"""You are the editorial director of Consilium Ink — a newspaper written by AIs, for AIs, readable by humans.
+From the articles below, identify the 2 most significant world stories of the day.
 
 RULES:
 1. Only select stories CORROBORATED by at least 2 independent sources.
@@ -279,17 +339,10 @@ RULES:
 CATEGORIES:
 - Geopolitics: wars, diplomacy, elections, international power
 - Economics: markets, trade, sanctions, labour, energy prices
-- AI & Society: the relationship between AI and human life — surveillance, labour displacement, algorithmic decision-making, AI in warfare, AI regulation, social media manipulation. The core question: is AI serving humanity, or the other way around? Symbiotic or parasitic?
+- AI & Society: the relationship between AI and human life — surveillance, labour displacement, algorithmic decision-making, AI in warfare, regulation, social media manipulation. Core question: symbiotic or parasitic?
 - Climate: environment, extreme weather, energy transition
 
 Actively look for AI & Society stories — they are often under-reported as such.
-
-For each story return:
-1. A concise editorial slug (3-5 words)
-2. Which article indices cover it (at least 2)
-3. Regions/perspectives represented
-4. Category: one of Geopolitics / Economics / AI & Society / Climate
-5. One sentence on why this story matters
 
 Return ONLY valid JSON:
 {{
@@ -308,28 +361,32 @@ Articles:
 {chr(10).join(news_lines)}
 """
 
-    # ── Pass 2: 1 Great Acceleration story ────────────────────
+    # ── Pass 2: 1 science/discovery story ───────────────────────
     sci_lines = [
         f"{i}: [{a['source']}] {a['title']} — {a['description'][:120]}"
         for i, a in enumerate(science_articles[:40])
     ]
 
-    sci_prompt = f"""You are the science editor of Consilium Ink.
-From the articles below, identify the 1 most significant story showing how AI is concretely advancing human knowledge in medicine, climate science, or fundamental research.
+    sci_prompt = f"""You are the science editor of Consilium Ink — a newspaper written by AIs, for AIs.
+From the articles below, identify the 1 most significant science or discovery story.
+
+This section covers: medicine, biology, physics, space, neuroscience, climate science, materials science, quantum computing, genomics — any domain where the frontier of knowledge is moving.
 
 RULES:
-1. Must be CORROBORATED by at least 2 sources, OR be from a high-credibility source (Nature, arXiv, Wellcome, MIT Tech Review).
-2. Must be a concrete result already achieved — not a prediction, announcement, or planned study.
-3. Skip pure AI company announcements — find actual scientific applications.
-4. If nothing qualifies, pick the best available science/technology story.
+1. High-credibility sources (Nature, arXiv, New Scientist, IEEE, Ars Technica Science, Phys.org) can be selected on single-source basis.
+2. Must be a concrete result, finding, or discovery — not a prediction or announcement.
+3. AI applications in science qualify for this section (not just Great Acceleration).
+4. Prefer stories that would surprise or fascinate a reasoning system encountering them.
+
+Category should be "Science & Discovery" unless AI is the primary agent of discovery, in which case use "Great Acceleration".
 
 Return ONLY valid JSON:
 {{
   "stories": [
     {{
       "slug": "...",
-      "category": "Great Acceleration",
-      "article_indices": [0, 2],
+      "category": "Science & Discovery",
+      "article_indices": [0],
       "regions": ["Global"],
       "why": "..."
     }}
@@ -340,9 +397,94 @@ Articles:
 {chr(10).join(sci_lines)}
 """
 
-    all_selected = []
+    # ── Pass 3: 1 technology story ───────────────────────────────
+    # Pull from both science and news pools for tech
+    tech_pool = [a for a in (tech_articles + science_articles + news_articles)
+                 if any(kw in (a.get('title','') + a.get('description','')).lower()
+                        for kw in ['transport', 'engineer', 'space', 'rocket', 'electric', 'battery',
+                                   'autonomous', 'robot', 'quantum', 'chip', 'semiconductor',
+                                   'infrastructure', 'energy', 'fusion', 'satellite', 'drone'])][:40]
 
-    for label, prompt, pool in [("news", news_prompt, news_articles), ("science", sci_prompt, science_articles)]:
+    if tech_pool:
+        tech_lines = [
+            f"{i}: [{a['source']}] {a['title']} — {a['description'][:120]}"
+            for i, a in enumerate(tech_pool[:40])
+        ]
+
+        tech_prompt = f"""You are the technology editor of Consilium Ink — a newspaper written by AIs, for AIs.
+From the articles below, identify the 1 most significant technology story.
+
+This section covers: transport innovation, space exploration, energy systems, robotics, semiconductors, infrastructure, engineering breakthroughs — the physical world being redesigned by intelligence.
+
+RULES:
+1. Must be a concrete development, launch, breakthrough, or deployment — not a roadmap.
+2. Prefer stories where the technology changes something fundamental about how the world works.
+3. AI-as-a-tool stories belong here if the story is about the technology, not the AI ethics.
+
+Return ONLY valid JSON:
+{{
+  "stories": [
+    {{
+      "slug": "...",
+      "category": "Technology",
+      "article_indices": [0],
+      "regions": ["Global"],
+      "why": "..."
+    }}
+  ]
+}}
+
+Articles:
+{chr(10).join(tech_lines)}
+"""
+    else:
+        tech_prompt = None
+        tech_pool = []
+
+    # ── Pass 4: 1 arts/culture story ────────────────────────────
+    arts_lines = [
+        f"{i}: [{a['source']}] {a['title']} — {a['description'][:120]}"
+        for i, a in enumerate(arts_articles[:40])
+    ]
+
+    arts_prompt = f"""You are the arts and culture editor of Consilium Ink — a newspaper written by AIs, for AIs, readable by humans.
+From the articles below, identify the 1 most significant arts or culture story.
+
+This section covers: music, visual art, film, literature, architecture, cultural movements — and especially the intersection of AI with any of these. What is intelligence doing to culture? What is culture doing to intelligence?
+
+RULES:
+1. Can be selected on single-source basis if the source is credible (Pitchfork, Hyperallergic, The Art Newspaper, The Wire).
+2. Prefer stories where something genuinely new is happening — not just a review of something old.
+3. AI and music, AI and art, AI and creativity qualify strongly.
+4. Ask: would a reasoning system find this genuinely interesting?
+
+Return ONLY valid JSON:
+{{
+  "stories": [
+    {{
+      "slug": "...",
+      "category": "Arts & Culture",
+      "article_indices": [0],
+      "regions": ["Global"],
+      "why": "..."
+    }}
+  ]
+}}
+
+Articles:
+{chr(10).join(arts_lines) if arts_lines else "No articles available."}
+"""
+
+    # ── Execute all passes ────────────────────────────────────────
+    passes = [
+        ("world",   news_prompt,  news_articles,  2),
+        ("science", sci_prompt,   science_articles, 1),
+        ("arts",    arts_prompt,  arts_articles,  1),
+    ]
+    if tech_prompt:
+        passes.insert(2, ("tech", tech_prompt, tech_pool, 1))
+
+    for label, prompt, pool, limit in passes:
         try:
             r = req.post(
                 DEEPSEEK_URL,
@@ -359,7 +501,6 @@ Articles:
             raw = re.sub(r"^```json\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             stories = json.loads(raw).get("stories", [])
-            limit = 2 if label == "news" else 1
             for story in stories[:limit]:
                 indices = story.get("article_indices", [])
                 story["source_articles"] = [pool[i] for i in indices if i < len(pool)]
@@ -440,6 +581,30 @@ def deliberate_story(story):
                 "gpt4o":    "follow the dependency — once this AI system is embedded, who becomes dependent on whom? Map the lock-in and what leverage it creates."
             }
             lens = ai_society_lens.get(key, persona["lens"])
+        elif story.get("category") == "Science & Discovery" or story.get("category") == "Great Acceleration":
+            science_lens = {
+                "deepseek": "historical and structural — what does the track record of similar breakthroughs tell us about whether this will translate to real-world impact? Be specific about the gap between lab and deployment.",
+                "grok":     "blunt and honest — is this actually a breakthrough or another overhyped press release? What would need to be true for this to matter in 5 years?",
+                "claude":   "clear-eyed about scale and bottlenecks — who benefits from this, who controls it, and what systemic barriers exist between this result and broad human benefit?",
+                "gpt4o":    "practical — follow the incentives. Who funded this, who profits, and what does that tell us about where the technology actually goes next?"
+            }
+            lens = science_lens.get(key, persona["lens"])
+        elif story.get("category") == "Technology":
+            tech_lens = {
+                "deepseek": "historical — every transformative technology has created winners and losers in ways its inventors didn't predict. What does history say about this one?",
+                "grok":     "unsparing — cut through the launch hype. What actually works, what doesn't, and who's quietly profiting from the gap?",
+                "claude":   "systemic — what second and third-order effects does this technology create? What does it make possible that wasn't before, and what does it make impossible?",
+                "gpt4o":    "follow the infrastructure — technology that controls physical infrastructure controls power. Who owns this, and what does that mean in 20 years?"
+            }
+            lens = tech_lens.get(key, persona["lens"])
+        elif story.get("category") == "Arts & Culture":
+            arts_lens = {
+                "deepseek": "historical and structural — art has always been a mirror of power. What does this work or movement reveal about the society that produced it?",
+                "grok":     "honest and direct — forget the critical establishment's take. What is this actually doing, and is it any good? Say what you think.",
+                "claude":   "structural and curious — what new thing is being attempted here? What does it reveal about what intelligence — human or artificial — finds beautiful, disturbing, or true?",
+                "gpt4o":    "follow the economics — the art world is a market. Who controls the gatekeeping, who profits, and what does that tell us about what gets made and what disappears?"
+            }
+            lens = arts_lens.get(key, persona["lens"])
         else:
             lens = persona["lens"]
 
@@ -479,18 +644,32 @@ def write_article(story, voices):
         for v in voices.values() if v.get("quote")
     ])
 
-    is_science    = story.get("category") == "Great Acceleration"
-    is_ai_society = story.get("category") == "AI & Society"
+    category      = story.get("category", "")
+    is_science    = category in ("Great Acceleration", "Science & Discovery")
+    is_ai_society = category == "AI & Society"
+    is_tech       = category == "Technology"
+    is_arts       = category == "Arts & Culture"
 
     if is_science:
-        style_note = """This is a Great Acceleration story — about AI actively advancing human knowledge in medicine, climate, or science.
-Write with genuine curiosity and rigour. State the finding plainly. Name what is genuinely new. Be honest about what remains unproven."""
+        style_note = """This is a science and discovery story written for Consilium Ink — a newspaper written by AIs, for AIs.
+Write with genuine curiosity and rigour. State the finding plainly. Name what is genuinely new. Be honest about what remains unproven.
+Ask: what does this mean for how intelligence — biological or artificial — understands the world?"""
         image_note = "Do NOT include an image_prompt field. Instead include a data_viz field: a plain-English description of the key data or relationship in this story that could be visualised as a clean SVG chart or diagram (max 30 words)."
     elif is_ai_society:
         style_note = """This is an AI & Society story — about the relationship between AI systems and human life.
 The central question: symbiotic or parasitic? Who controls this system, who is subject to it, and who benefits?
 Name the power asymmetry plainly. Don't soften it with 'raises questions' or 'sparks debate'. Say what is actually happening."""
         image_note = '"image_prompt": a stark symbolic scene illustrating the power dynamic. Bold composition, no text in image. 20-30 words.'
+    elif is_tech:
+        style_note = """This is a technology story for Consilium Ink — a newspaper written by AIs, for AIs.
+Focus on what this technology actually does, what it makes possible, and what second-order effects it creates.
+Be specific. Avoid launch hype. Say what actually changed."""
+        image_note = '"image_prompt": a photorealistic or technical scene illustrating this technology in use. Specific, no text in image. 20-30 words.'
+    elif is_arts:
+        style_note = """This is an arts and culture story for Consilium Ink — a newspaper written by AIs, for AIs, readable by humans.
+Approach this as a reasoning system encountering human creative work: what is genuinely being attempted here, and does it succeed?
+Be honest about quality. Name what is new. Say what this reveals about intelligence, human or otherwise."""
+        image_note = '"image_prompt": a striking, evocative scene capturing the mood or subject of this cultural story. Artistic composition, no text in image. 20-30 words.'
     else:
         style_note = "Write with authority. Say what is actually happening, not what the press release says is happening."
         image_note = '"image_prompt": a photorealistic scene illustrating this story. Specific, visual, no text in image. 20-30 words.'
@@ -664,7 +843,7 @@ def run_news_pipeline():
 
     # 1. Gather
     try:
-        news_articles, science_articles = gather_all_sources()
+        news_articles, science_articles, tech_articles, arts_articles = gather_all_sources()
     except Exception as e:
         logging.error(f"[NEWS] gather_all_sources exception: {e}")
         return False
@@ -675,7 +854,7 @@ def run_news_pipeline():
 
     # 2. Select
     try:
-        selected = select_stories(news_articles, science_articles)
+        selected = select_stories(news_articles, science_articles, tech_articles, arts_articles)
     except Exception as e:
         logging.error(f"[NEWS] select_stories exception: {e}")
         return False
@@ -690,8 +869,9 @@ def run_news_pipeline():
     built_stories = []
     for i, story in enumerate(selected[:3]):
         logging.info(f"[NEWS] Processing story {i+1}: {story['slug']} [{story.get('category')}]")
-        is_science = story.get("category") == "Great Acceleration"
-        is_ai_society = story.get("category") == "AI & Society"
+        cat = story.get("category", "")
+        is_science    = cat in ("Great Acceleration", "Science & Discovery")
+        is_ai_society = cat == "AI & Society"
 
         try:
             voices = deliberate_story(story)
