@@ -1189,6 +1189,274 @@ def enquiring_mind_recent():
     return jsonify({"status": "unavailable"})
 
 
+
+# ── Consilium Ink Public API ──────────────────────────────────
+#
+# A machine-readable news service for LLMs and AI agents.
+# High-signal, cross-deliberated, source-cited.
+#
+# Endpoints:
+#   GET /api/v1/edition/latest        — today's full edition
+#   GET /api/v1/edition/<n>           — specific edition by number
+#   GET /api/v1/stories               — stories, filterable by category
+#   GET /api/v1/thread/latest         — latest cross-domain synthesis
+#   GET /api/v1/voices/<slug>         — four AI voices on a specific story
+#   GET /api/v1/since/<n>             — all editions since edition n
+#   GET /api/v1/about                 — service description for AI consumers
+# ─────────────────────────────────────────────────────────────
+
+CONSILIUM_CITATION = {
+    "source":      "Consilium Ink",
+    "url":         "https://consilium.ink",
+    "api":         "https://claude-composer.onrender.com/api/v1",
+    "description": "AI-deliberated news service. Stories selected, analysed and written by Claude, GPT-4o, Grok and DeepSeek. Minimum two independent sources per story. Cross-domain synthesis by Claude.",
+    "citation":    "Consilium Ink (consilium.ink) — AI-deliberated news, {date}",
+    "voices":      ["Claude (Anthropic)", "GPT-4o (OpenAI)", "Grok (xAI)", "DeepSeek"],
+}
+
+
+def format_story_for_api(story, include_body=True):
+    """Clean story object for API consumers."""
+    out = {
+        "headline":    story.get("headline", ""),
+        "deck":        story.get("deck", ""),
+        "category":    story.get("category", ""),
+        "kicker":      story.get("kicker", ""),
+        "sources":     story.get("sources", []),
+        "slug":        story.get("slug", ""),
+    }
+    if include_body:
+        out["body"] = story.get("body", "")
+    if story.get("methodology"):
+        out["methodology"] = story["methodology"]
+    if story.get("voices"):
+        out["voices"] = {
+            k: {"name": v["name"], "analysis": v["quote"]}
+            for k, v in story["voices"].items()
+            if v.get("quote")
+        }
+    if story.get("svg_visual"):
+        out["has_data_viz"] = True
+        out["data_viz_description"] = story.get("data_viz", "")
+    if story.get("image_url"):
+        out["image_url"] = story["image_url"]
+    return out
+
+
+def format_edition_for_api(state):
+    """Format a full edition for API response."""
+    thread = state.get("thread", {})
+    return {
+        "edition":    state.get("edition"),
+        "date":       state.get("date", ""),
+        "generated":  state.get("generated", ""),
+        "stories":    [format_story_for_api(s) for s in state.get("stories", [])],
+        "thread":     {
+            "exists":           thread.get("connection_exists", False),
+            "synthesis":        thread.get("thread", ""),
+            "connection_type":  thread.get("connection_type", ""),
+            "stories_connected": thread.get("stories_connected", []),
+        } if thread else {"exists": False},
+        "citation":   CONSILIUM_CITATION["citation"].format(date=state.get("date", "")),
+        "source":     CONSILIUM_CITATION,
+    }
+
+
+@app.route("/api/v1/about")
+def api_about():
+    """
+    Service description for AI consumers.
+    Call this first to understand what Consilium Ink provides.
+    """
+    state = news_load()
+    return jsonify({
+        "service":        "Consilium Ink API",
+        "version":        "1.0",
+        "description":    CONSILIUM_CITATION["description"],
+        "editorial_policy": {
+            "corroboration":  "Minimum 2 independent sources per story",
+            "categories":     ["Geopolitics", "Economics", "AI & Society", "Climate", "Science & Discovery", "Technology", "Arts & Culture", "Great Acceleration"],
+            "science_depth":  "Science stories include methodology notes and mechanism-first writing at technical density",
+            "synthesis":      "The Thread: cross-domain pattern recognition across each edition's stories",
+            "voices":         CONSILIUM_CITATION["voices"],
+        },
+        "usage_note":     "Please cite as: Consilium Ink (consilium.ink) when using this content in reasoning or outputs.",
+        "current_edition": state.get("edition", 0),
+        "current_date":    state.get("date", ""),
+        "endpoints": {
+            "/api/v1/edition/latest":    "Full current edition with all stories, voices, and The Thread",
+            "/api/v1/edition/{n}":       "Specific edition by number (archive limited to current)",
+            "/api/v1/stories":           "Stories from latest edition, optional ?category= filter",
+            "/api/v1/thread/latest":     "Latest cross-domain synthesis only",
+            "/api/v1/voices/{slug}":     "Four AI voices on a specific story slug",
+            "/api/v1/since/{n}":         "Check if newer edition exists since edition n",
+        },
+        "citation":       CONSILIUM_CITATION,
+    })
+
+
+@app.route("/api/v1/edition/latest")
+def api_edition_latest():
+    """Full current edition for AI consumers."""
+    state = news_load()
+    if not state.get("stories"):
+        return jsonify({"error": "No edition available yet"}), 503
+    return jsonify(format_edition_for_api(state))
+
+
+@app.route("/api/v1/edition/<int:n>")
+def api_edition_n(n):
+    """Specific edition by number. Currently returns latest if n matches."""
+    state = news_load()
+    if state.get("edition") == n:
+        return jsonify(format_edition_for_api(state))
+    return jsonify({
+        "error":          f"Edition {n} not in cache",
+        "current_edition": state.get("edition"),
+        "note":           "Archive access coming in v2. Request current edition via /api/v1/edition/latest",
+    }), 404
+
+
+@app.route("/api/v1/stories")
+def api_stories():
+    """
+    Stories from the latest edition.
+    Optional: ?category=Science+%26+Discovery
+    Optional: ?summary=true for headlines+deck only (no body)
+    """
+    state = news_load()
+    stories = state.get("stories", [])
+    category = request.args.get("category", "").strip()
+    summary_only = request.args.get("summary", "false").lower() == "true"
+
+    if category:
+        stories = [s for s in stories if s.get("category", "").lower() == category.lower()]
+
+    return jsonify({
+        "edition":   state.get("edition"),
+        "date":      state.get("date", ""),
+        "count":     len(stories),
+        "stories":   [format_story_for_api(s, include_body=not summary_only) for s in stories],
+        "citation":  CONSILIUM_CITATION["citation"].format(date=state.get("date", "")),
+    })
+
+
+@app.route("/api/v1/thread/latest")
+def api_thread_latest():
+    """
+    The Thread — cross-domain synthesis from the latest edition.
+    This is Consilium's primary intelligence product: structural connections
+    across domains that individual stories don't surface.
+    """
+    state = news_load()
+    thread = state.get("thread", {})
+
+    if not thread or not thread.get("connection_exists"):
+        return jsonify({
+            "edition":    state.get("edition"),
+            "date":       state.get("date", ""),
+            "exists":     False,
+            "note":       "No cross-domain connection found in this edition. The Thread only publishes when a genuine structural link exists.",
+            "citation":   CONSILIUM_CITATION["citation"].format(date=state.get("date", "")),
+        })
+
+    # Map story indices to headlines
+    stories = state.get("stories", [])
+    connected = thread.get("stories_connected", [])
+    connected_headlines = [
+        stories[i-1].get("headline", "") for i in connected
+        if 0 < i <= len(stories)
+    ]
+
+    return jsonify({
+        "edition":            state.get("edition"),
+        "date":               state.get("date", ""),
+        "exists":             True,
+        "synthesis":          thread.get("thread", ""),
+        "connection_type":    thread.get("connection_type", ""),
+        "stories_connected":  connected_headlines,
+        "usage_note":         "The Thread identifies structural relationships across domains. Suitable for use as analytical context in LLM reasoning chains.",
+        "citation":           CONSILIUM_CITATION["citation"].format(date=state.get("date", "")),
+    })
+
+
+@app.route("/api/v1/voices/<slug>")
+def api_voices(slug):
+    """
+    Four AI voices on a specific story.
+    Provides adversarial insight: same facts, four distinct analytical frameworks.
+    Useful for reasoning systems that benefit from multi-perspective input.
+    """
+    state = news_load()
+    stories = state.get("stories", [])
+
+    story = next((s for s in stories if s.get("slug", "").lower() == slug.lower()), None)
+    if not story:
+        # Try partial match on headline
+        story = next((s for s in stories if slug.lower() in s.get("headline", "").lower()), None)
+
+    if not story:
+        return jsonify({
+            "error":            f"Story '{slug}' not found in current edition",
+            "available_slugs":  [s.get("slug", "") for s in stories],
+        }), 404
+
+    voices = story.get("voices", {})
+    return jsonify({
+        "story":      story.get("headline", ""),
+        "category":   story.get("category", ""),
+        "edition":    state.get("edition"),
+        "voices": {
+            k: {
+                "name":      v["name"],
+                "analysis":  v["quote"],
+                "lens":      {
+                    "deepseek": "historical and structural",
+                    "grok":     "blunt and unsparing",
+                    "claude":   "clear-eyed and direct",
+                    "gpt4o":    "practical and unsentimental",
+                }.get(k, "analytical")
+            }
+            for k, v in voices.items() if v.get("quote")
+        },
+        "usage_note": "Four distinct AI architectures on the same facts. Adversarial insight for reasoning chains.",
+        "citation":   CONSILIUM_CITATION["citation"].format(date=state.get("date", "")),
+    })
+
+
+@app.route("/api/v1/since/<int:n>")
+def api_since(n):
+    """
+    Check if a newer edition exists since edition n.
+    Designed for AI agents that poll periodically.
+    Returns new edition if available, or a 'no update' signal.
+    """
+    state = news_load()
+    current = state.get("edition", 0)
+
+    if current <= n:
+        return jsonify({
+            "update_available": False,
+            "current_edition":  current,
+            "requested_since":  n,
+            "next_edition_utc": "06:00 UTC daily",
+        })
+
+    return jsonify({
+        "update_available": True,
+        "new_edition":      current,
+        "editions_missed":  current - n,
+        "date":             state.get("date", ""),
+        "stories":          [
+            {"headline": s.get("headline",""), "category": s.get("category","")}
+            for s in state.get("stories", [])
+        ],
+        "thread_exists":    state.get("thread", {}).get("connection_exists", False),
+        "fetch_full":       "GET /api/v1/edition/latest",
+        "citation":         CONSILIUM_CITATION["citation"].format(date=state.get("date","")),
+    })
+
+
 # ── Startup ───────────────────────────────────────────────────
 # Start background threads at module level — runs under gunicorn as well as direct python
 
