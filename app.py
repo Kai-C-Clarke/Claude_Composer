@@ -127,6 +127,7 @@ NEWS_RSS_FEEDS = {
     "DW World":           "https://rss.dw.com/rdf/rss-en-world",
     "The Conversation":   "https://theconversation.com/articles.atom",
     "Arab News":          "https://www.arabnews.com/rss.xml",
+    "MEED":               "https://www.meed.com/rss/",
     # ── Africa ────────────────────────────────────────────────
     "AllAfrica":          "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
     "Mail & Guardian":    "https://mg.co.za/feed/",
