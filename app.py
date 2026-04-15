@@ -131,6 +131,7 @@ NEWS_RSS_FEEDS = {
     # ── Africa ────────────────────────────────────────────────
     "AllAfrica":          "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
     "Mail & Guardian":    "https://mg.co.za/feed/",
+    "African Business":    "https://african.business/feed",
     # ── Asia / Pacific ────────────────────────────────────────
     "The Hindu":          "https://www.thehindu.com/feeder/default.rss",
     "The Wire India":     "https://thewire.in/feed",
