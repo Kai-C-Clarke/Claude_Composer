@@ -113,7 +113,7 @@ MODELS = {
     "grok":     {"url": "https://api.x.ai/v1/chat/completions",      "model": "grok-3",                   "key": os.environ.get("GROK_API_KEY", "")},
     "deepseek": {"url": "https://api.deepseek.com/chat/completions",  "model": "deepseek-chat",            "key": os.environ.get("DEEPSEEK_API_KEY", "")},
     "gpt4o":    {"url": "https://api.openai.com/v1/chat/completions", "model": "gpt-4o",                   "key": os.environ.get("OPENAI_API_KEY", "")},
-    "claude":   {"url": "https://api.anthropic.com/v1/messages",      "model": "claude-sonnet-4-20250514", "key": os.environ.get("ANTHROPIC_API_KEY", "")},
+    "claude":   {"url": "https://api.anthropic.com/v1/messages",      "model": "claude-sonnet-4-6", "key": os.environ.get("ANTHROPIC_API_KEY", "")},
 }
 
 # ── RSS Sources ───────────────────────────────────────────────
@@ -886,7 +886,7 @@ Requirements:
                 "content-type":      "application/json"
             },
             json={
-                "model":      "claude-sonnet-4-20250514",
+                "model":      "claude-sonnet-4-6",
                 "max_tokens": 1500,
                 "messages":   [{"role": "user", "content": prompt}]
             },
@@ -963,7 +963,7 @@ Return ONLY valid JSON:
                 "content-type":      "application/json"
             },
             json={
-                "model":      "claude-sonnet-4-20250514",
+                "model":      "claude-sonnet-4-6",
                 "max_tokens": 400,
                 "messages":   [{"role": "user", "content": prompt}]
             },
