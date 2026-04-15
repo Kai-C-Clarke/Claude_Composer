@@ -845,19 +845,22 @@ def generate_image(prompt_text, filename):
 
         logging.info(f"[NEWS] Grok image generated: {temp_url[:60]}...")
 
-        # Download and cache to disk
-        img_r = req.get(temp_url, timeout=30)
-        if img_r.status_code != 200:
-            logging.warning(f"[NEWS] Image download failed: {img_r.status_code}")
-            return temp_url  # Fall back to temp URL rather than nothing
+        # Download and embed as base64 data URI — no disk required
+        try:
+            img_r = req.get(temp_url, timeout=30)
+            if img_r.status_code == 200:
+                import base64 as _b64
+                img_b64 = _b64.b64encode(img_r.content).decode('utf-8')
+                ct = img_r.headers.get('content-type', 'image/jpeg')
+                data_uri = f"data:{ct};base64,{img_b64}"
+                logging.info(f"[NEWS] Image embedded as base64 ({len(img_r.content):,} bytes)")
+                return data_uri
+        except Exception as disk_err:
+            logging.warning(f"[NEWS] Image embed failed: {disk_err}")
 
-        filepath = os.path.join(IMAGE_CACHE_DIR, filename)
-        with open(filepath, "wb") as f:
-            f.write(img_r.content)
-
-        cached_url = f"{IMAGE_SERVE_URL}/{filename}"
-        logging.info(f"[NEWS] Image cached: {filepath} → {cached_url}")
-        return cached_url
+        # Last resort — Grok temp URL
+        logging.info(f"[NEWS] Using Grok temp URL")
+        return temp_url
 
     except Exception as e:
         logging.warning(f"[NEWS] generate_image failed: {e}")
