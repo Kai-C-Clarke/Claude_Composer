@@ -120,12 +120,22 @@ MODELS = {
 
 # ── World / Politics / Economics feeds ───────────────────────
 NEWS_RSS_FEEDS = {
+    # ── Global / Western ──────────────────────────────────────
     "Al Jazeera English": "https://www.aljazeera.com/xml/rss/all.xml",
     "BBC World":          "http://feeds.bbci.co.uk/news/world/rss.xml",
-    "Arab News":          "https://www.arabnews.com/rss.xml",
     "France 24":          "https://www.france24.com/en/rss",
     "DW World":           "https://rss.dw.com/rdf/rss-en-world",
     "The Conversation":   "https://theconversation.com/articles.atom",
+    "Arab News":          "https://www.arabnews.com/rss.xml",
+    # ── Africa ────────────────────────────────────────────────
+    "AllAfrica":          "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
+    "Mail & Guardian":    "https://mg.co.za/feed/",
+    # ── Asia / Pacific ────────────────────────────────────────
+    "The Hindu":          "https://www.thehindu.com/feeder/default.rss",
+    "The Wire India":     "https://thewire.in/feed",
+    "The Diplomat":       "https://thediplomat.com/feed/",
+    # ── Latin America / Global South ─────────────────────────
+    "Global Voices":      "https://globalvoices.org/feed/",
 }
 
 # ── Science / Medicine / Technology feeds ─────────────────────
@@ -156,7 +166,7 @@ ARTS_RSS_FEEDS = {
     "Resident Advisor":      "https://ra.co/xml/news.xml",
 }
 
-GDELT_URL         = "https://api.gdeltproject.org/api/v2/doc/doc?query=war+OR+conflict+OR+economy+OR+climate&mode=artlist&maxrecords=10&format=json"
+GDELT_URL         = "https://api.gdeltproject.org/api/v2/doc/doc?query=war+OR+conflict+OR+economy+OR+climate+OR+Africa+OR+Asia+OR+Latin+America+OR+Sudan+OR+Congo+OR+India+OR+Japan+OR+Brazil&mode=artlist&maxrecords=15&format=json"
 GDELT_SCIENCE_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=AI+medicine+OR+climate+breakthrough+OR+scientific+discovery&mode=artlist&maxrecords=8&format=json"
 GDELT_TECH_URL    = "https://api.gdeltproject.org/api/v2/doc/doc?query=transport+innovation+OR+engineering+breakthrough+OR+space+mission&mode=artlist&maxrecords=8&format=json"
 
