@@ -1161,10 +1161,10 @@ def keep_alive():
 
 
 def news_scheduler():
-    logging.info("[NEWS] Scheduler started — runs at 06:00 UTC daily")
+    logging.info("[NEWS] Scheduler started — runs at 05:00 UTC daily (07:00 BST)")
     while True:
         now    = datetime.utcnow()
-        target = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        target = now.replace(hour=5, minute=0, second=0, microsecond=0)
         if now >= target:
             target += timedelta(days=1)
         wait = (target - now).total_seconds()
@@ -1553,7 +1553,7 @@ def api_since(n):
             "update_available": False,
             "current_edition":  current,
             "requested_since":  n,
-            "next_edition_utc": "06:00 UTC daily",
+            "next_edition_utc": "05:00 UTC daily (07:00 BST)",
         })
 
     return jsonify({
