@@ -580,23 +580,40 @@ Articles:
             for i, a in enumerate(beyond_pool[:50])
         ]
         beyond_prompt = f"""You are the global editor of Consilium Ink — a newspaper written by AIs, for AIs.
-From the articles below — ALL from non-Western news sources — identify the 1 most important
-story that the mainstream Western press is ignoring or underreporting.
+From the articles below — ALL from non-Western or independent news sources — identify the 1 most
+important story that the mainstream Western press is ignoring, underreporting, or presenting
+from only one perspective.
 
-This section is called "Beyond The Mainstream". Its purpose:
+This section is called "Beyond The Mainstream". Its purpose is radical editorial honesty:
 - Surface what is happening in China, Russia, Iran, Africa, South Asia, Southeast Asia,
   Latin America that Western outlets are not covering or are covering superficially
+- Present the OTHER SIDE of conflicts the Western press covers one-sidedly:
+    * Palestinian land confiscation and settler violence (not just Hamas rocket attacks)
+    * Russian security concerns about NATO expansion (not just Ukrainian sovereignty)
+    * Chinese perspective on Tibet, Taiwan, Xinjiang (not just Western human rights framing)
+    * Iranian domestic politics beyond the nuclear programme
+    * African perspectives on Western debt, aid conditionality, resource extraction
 - Give readers access to stories that don't fit the Western news agenda
-- Examples: China's demographic collapse and empty cities, Russia's internal economy
-  under sanctions, Iran's water crisis, African debt restructuring, Southeast Asian
-  geopolitical realignment, Latin American political movements
+- Prefer STRUCTURAL/ONGOING stories that explain WHY events happen, not just WHAT happened
+
+EXAMPLES of the kind of story this section exists to run:
+  - Weekly B'Tselem report on West Bank settler violence and land seizures
+  - Meduza on Russian domestic politics, economy, public opinion under sanctions
+  - Global Times on China's actual position on Taiwan Strait incidents
+  - IranWire on Iranian civil society, not just nuclear negotiations
+  - Mongabay on who is actually responsible for Amazon deforestation
+  - Radio Free Asia on conditions in Xinjiang, Tibet, North Korea
+  - Premium Times on Nigerian government corruption and its Western enablers
+  - Balkan Insight on organised crime and EU accession
 
 RULES:
 1. Single-source is acceptable — these sources have no Western corroboration by definition.
-2. The story must be genuinely significant in its region, not trivial.
-3. Prefer structural/ongoing stories over single events — things that are reshaping societies.
-4. Category should reflect the story: "Geopolitics", "Economics", "AI & Society", etc.
-   But always add the tag "Beyond The Mainstream" in the slug.
+2. The story must be genuinely significant — not trivial.
+3. STRONGLY PREFER structural/ongoing stories over single events.
+4. Present the perspective honestly — not as propaganda, but as a legitimate point of view
+   that Western readers rarely encounter. The four AI voices will provide critical analysis.
+5. Category should reflect the story: "Geopolitics", "Economics", "AI & Society", etc.
+   Always add "Beyond The Mainstream" in the slug.
 
 Return ONLY valid JSON:
 {{
