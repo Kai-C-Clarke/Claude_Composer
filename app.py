@@ -271,9 +271,15 @@ def news_save(data):
 
 def fetch_rss(name, url, max_items=5):
     try:
-        r = req.get(url, timeout=10, headers={"User-Agent": "ConsiliumInk/1.0"})
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; ConsiliumInk/2.0; +https://consilium.ink)"}
+        r = req.get(url, timeout=12, headers=headers)
         if r.status_code != 200:
-            return []
+            # Retry once with delay for non-western sources that may need warm-up
+            import time as _time; _time.sleep(3)
+            r = req.get(url, timeout=15, headers=headers)
+            if r.status_code != 200:
+                logging.warning(f"[RSS] {name}: HTTP {r.status_code}")
+                return []
         root = ET.fromstring(r.content)
         results = []
         for item in root.findall(".//item")[:max_items]:
