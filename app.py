@@ -1359,6 +1359,35 @@ def news_generate():
     return jsonify({"status": "pipeline started", "check": "/news/state"})
 
 
+@app.route("/news/patch", methods=["POST"])
+def news_patch():
+    """Patch a specific story's voice quote without regenerating the full edition."""
+    if request.args.get("key") != CONSILIUM_KEY:
+        return jsonify({"error": "Unauthorised"}), 401
+    data  = request.get_json(force=True)
+    slug  = data.get("slug")
+    voice = data.get("voice")   # e.g. "claude"
+    quote = data.get("quote")
+    if not all([slug, voice, quote]):
+        return jsonify({"error": "slug, voice, quote required"}), 400
+    state = news_load()
+    stories = state.get("stories", [])
+    patched = 0
+    for s in stories:
+        if s.get("slug") == slug:
+            if "voices" not in s:
+                s["voices"] = {}
+            if voice not in s["voices"]:
+                s["voices"][voice] = {}
+            s["voices"][voice]["quote"]    = quote
+            s["voices"][voice]["analysis"] = quote
+            patched += 1
+    if patched == 0:
+        return jsonify({"error": f"Story '{slug}' not found"}), 404
+    news_save(state)
+    return jsonify({"status": "patched", "slug": slug, "voice": voice})
+
+
 @app.route("/enquiring-mind")
 def enquiring_mind():
     """
