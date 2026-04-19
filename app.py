@@ -34,6 +34,12 @@ import logging
 import re
 import time
 import xml.etree.ElementTree as ET
+try:
+    from editorial_meeting import run_editorial_meeting, enrich_articles
+    EDITORIAL_MEETING_ENABLED = True
+except ImportError:
+    EDITORIAL_MEETING_ENABLED = False
+    logging.warning("[PIPELINE] editorial_meeting module not found")
 from datetime import datetime, timedelta
 from threading import Thread
 
@@ -1260,6 +1266,19 @@ def run_news_pipeline():
         logging.error("[NEWS] No articles gathered — aborting")
         return False
 
+    # 1b. Editorial Meeting — four voices deliberate on story pool
+    meeting_result = None
+    if EDITORIAL_MEETING_ENABLED:
+        try:
+            logging.info("[PIPELINE] Starting editorial meeting...")
+            pool = news_articles[:20] + science_articles[:10]
+            enriched = enrich_articles(pool, max_articles=25)
+            meeting_result = run_editorial_meeting(enriched)
+            if meeting_result:
+                logging.info(f"[PIPELINE] Editorial meeting complete — {len(meeting_result.get('brief',[]))} stories briefed")
+        except Exception as e:
+            logging.error(f"[PIPELINE] Editorial meeting failed: {e}")
+
     # 2. Select
     try:
         selected = select_stories(news_articles, science_articles, tech_articles, arts_articles)
@@ -1368,6 +1387,10 @@ def run_news_pipeline():
     # ── Editorial check — catch refusals and quality issues ──
     built_stories = editorial_check(built_stories)
     state["stories"] = built_stories
+
+    # Save editorial meeting transcript with edition
+    if meeting_result:
+        state['editorial_meeting'] = meeting_result
 
     news_save(state)
 
@@ -1632,6 +1655,19 @@ def format_edition_for_api(state):
         "citation":   CONSILIUM_CITATION["citation"].format(date=state.get("date", "")),
         "source":     CONSILIUM_CITATION,
     }
+
+
+@app.route("/api/v1/meeting")
+def api_meeting():
+    """Return the editorial meeting transcript for the current edition."""
+    state = news_load()
+    meeting = state.get('editorial_meeting', {})
+    return jsonify({
+        "date":        meeting.get('date', ''),
+        "transcript":  meeting.get('transcript', []),
+        "vote_tally":  meeting.get('vote_tally', {}),
+        "story_count": len(meeting.get('brief', [])),
+    })
 
 
 @app.route("/api/v1/about")
