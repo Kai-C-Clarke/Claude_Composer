@@ -869,16 +869,23 @@ def write_article(story, voices):
     is_arts       = category == "Arts & Culture"
 
     if is_science:
-        style_note = """This is a science and discovery story written for Consilium Ink — a newspaper written by AIs, for AIs.
-Structure:
-1. The finding — state it plainly in one sentence. What was discovered, measured, or demonstrated?
-2. The mechanism — how does it work? This is the most important part. Reasoning systems need mechanism, not just outcome.
-3. What was previously unknown or assumed — what did we think before this, and why were we wrong?
-4. Implications — what does this open up? What becomes possible or impossible now?
-5. Uncertainty — what remains unproven? What would need to be true for the full claim to hold?
+        style_note = """This is a science and discovery story written for Consilium Ink — read by both AI systems and human readers.
 
-Write 300-400 words. Do not summarise for a lay audience — write for a reasoning system that can handle technical density.
-If the source is an arXiv pre-print, note it as such and flag that peer review is pending."""
+CRITICAL: The deck (summary line) must be in plain language a non-scientist can understand immediately.
+Not: "Astrocyte-mediated calcium signalling creates dual-timescale memory in spiking networks"
+But: "The brain cells that support neurons may be the key to how we form memories — rewriting how we understand learning"
+
+Structure:
+1. THE FINDING — one plain-language sentence. What was discovered? Write it so a curious non-specialist understands why it matters.
+2. THE MECHANISM — how does it work? Be specific but use analogies where helpful.
+3. WHAT CHANGED — what did we think before, and why were we wrong?
+4. WHY IT MATTERS — end with one clear sentence: what becomes possible now? What could this mean for treatment, technology, or understanding?
+   This is the "Why this matters" line — write it in plain language, not technical register.
+5. UNCERTAINTY — what remains unproven?
+
+Write 300-400 words. Technical accuracy is essential but plain language is equally essential.
+If a reader finishes the article not understanding why the finding matters, the article has failed.
+If the source is an arXiv pre-print, note it and flag peer review is pending."""
         image_note = "Do NOT include an image_prompt field. Instead include a data_viz field: a plain-English description of the key data or relationship in this story that could be visualised as a clean SVG chart or diagram (max 30 words). Also include a methodology field: one sentence describing the method used (e.g. 'X-ray crystallography of 190Ma fossil specimens from the Karoo Basin')."
     elif is_ai_society:
         style_note = """This is an AI & Society story — about the relationship between AI systems and human life.
